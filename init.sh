@@ -1,13 +1,14 @@
 #!/bin/bash
 set -e
 
-# Set up this project
-# ...
+echo "Creating all conda environments..."
+for env_file in envs/*.yml; do
+    env_name=$(basename "$env_file" .yml)
+    echo "Setting up $env_name"
+    conda env create -f "$env_file" || conda env update -f "$env_file"
+done
 
-# Set up the pulled-in submodule
-cd mge_cluster
-./init.sh
-cd ..
+echo "Installing Python CLI..."
+pip install -e .
 
-# Continue with main project setup
-# ...
+echo "Setup complete! You can now run the pipeline with: mrsa_plasmid_analysis"

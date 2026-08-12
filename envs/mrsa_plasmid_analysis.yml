@@ -1,10 +1,11 @@
-name: mge_cluster
+name: mrsa_plasmid_analysis
 channels:
   - bioconda
   - conda-forge
   - defaults
 dependencies:
-  - mge_cluster
+  - mge-cluster
+  - mashtree
   - python=3.10
   - pip
   - pip:

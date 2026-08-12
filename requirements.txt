@@ -1,0 +1,11 @@
+numpy
+pandas
+seaborn
+matplotlib
+seaborn
+scikit-learn
+statsmodels
+scipy
+scikit-bio
+geopandas
+baltic

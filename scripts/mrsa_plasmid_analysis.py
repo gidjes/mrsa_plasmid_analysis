@@ -1,9 +1,13 @@
 import pandas as pd
 import os
+from multiprocessing import Pool, set_start_method
 
-from mge_cluster.scripts.main import main as mge_main
-from helper_functions import clean_plasmid_df
+import config
+import mge_bootstrap
 import population_description
+import nearest_neighbour_analysis
+import bin_dynamics
+from helper_functions import clean_plasmid_df
 
 
 def mrsa_plasmid_analysis():
@@ -45,24 +49,39 @@ def mrsa_plasmid_analysis():
     # ---------------------------------------------------------
     # 2. mge-bootstrap -> create scheme
     # ---------------------------------------------------------
-    mge_main()
+    os.makedirs("logs/mge/", exist_ok=True)
+    os.makedirs("mge_bootstrap/", exist_ok=True)
+    mge_bootstrap.create_input_file()
+    mge_bootstrap.bootstrap_mge_cluster()
+    perplexity = mge_bootstrap.bootstrap_rand("perplexity")
+    clustersize = mge_bootstrap.bootstrap_rand("clustersize")
+    mge_bootstrap.optimised_mge(perplexity, clustersize)
 
     # ---------------------------------------------------------
     # 3. Population description
     # ---------------------------------------------------------
+    genome_df = pd.read_csv("data/PlasmidNL_report.csv", sep=";")
+    plasmid_df = genome_df.merge(
+        metadata_df, left_on="Parent", right_on="Isolate_ID", how="left"
+    )
     clustering_df = pd.read_csv("data/clustering.csv")
     plasmid_df = clean_plasmid_df(metadata_df, clustering_df)
     population_description.dataset_overview(plasmid_df)
-    population_description.cluster_overview(plasmid_df)
 
     # ---------------------------------------------------------
     # 4. Scheme / cluster-level description
     # ---------------------------------------------------------
+    population_description.cluster_overview(plasmid_df)
 
     # ---------------------------------------------------------
     # 5. Nearly-identical plasmid analysis
     # ---------------------------------------------------------
+    nearest_neighbour_analysis.mashtree_builder(
+        plasmid_df, config.NJOBS, config.CLUSTER_COL
+    )
+    bin_dynamics.bin_post_hoc(plasmid_df)
 
 
 if __name__ == "__main__":
+    set_start_method("spawn")
     mrsa_plasmid_analysis()

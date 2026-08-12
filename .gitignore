@@ -4,3 +4,5 @@ scripts/BN_metadata.py
 fastqs/
 fastas/
 data/
+mrsa_plasmid_analysis.egg-info/
+scripts/__pycache__/

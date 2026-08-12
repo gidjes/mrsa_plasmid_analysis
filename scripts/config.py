@@ -2,11 +2,12 @@
 
 # Column names
 ## General
+NJOBS = 1
+
+## Meta cols
 PLASMID_COL = "Plasmid"
 ISOLATE_COL = "Parent"
 ID_COL = "PERSON_UNIFIEDPERSONID"
-
-## Meta cols
 SPECIES_COL = "ISOLATE_TL_SPECIES"
 ST_COL = "ISOLATE_TL_MLST_ST"
 LA_COL = "ISOLATE_TL_SA_CLASS"
@@ -16,6 +17,8 @@ ORIGIN_COL = "origin"
 CLUSTER_COL = "Standard_Cluster_mrsa"
 TSNE1D = "tsne_1D_mrsa"
 TSNE2D = "tsne_2D_mrsa"
+MOBILITY_COL = "mobility"
+REPLICON_COL = "replicon"
 AMR_COL = "amr"
 VIR_COL = "virulence"
 METAL_COL = "metal"
@@ -28,7 +31,6 @@ PROVINCE_COL_BACKUP = "PERSON_PROVINCE"
 CITY_COL = "MATERIAL_SUBMITTER_CITY"
 CITY_COL_BACKUP = "PERSON_CITY"
 SUBMITTER_TYPE = "MATERIAL_SUBMITTER_TYPE"
-
 
 # Palettes
 SPECIES_PALETTE = {

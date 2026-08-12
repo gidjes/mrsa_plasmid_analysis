@@ -7,9 +7,19 @@ setup(
     install_requires=[
         "numpy",
         "pandas",
+        "matplotlib",
         "seaborn",
-        "scikit-learn"
-        "pip"
+        "scikit-learn",
+        "statsmodels",
+        "scipy",
+        "scikit-bio",
+        "geopandas",
+        "baltic",
+        "pip",
     ],
-    entry_points={"console_scripts": ["mrsa_plasmid_analysis = scripts.main:main"]},
+    entry_points={
+        "console_scripts": [
+            "mrsa_plasmid_analysis = scripts.mrsa_plasmid_analysis:mrsa_plasmid_analysis"
+        ]
+    },
 )
