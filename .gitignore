@@ -1,0 +1,6 @@
+samples_to_find.txt
+scripts/get_fastq.py
+scripts/BN_metadata.py
+fastqs/
+fastas/
+data/

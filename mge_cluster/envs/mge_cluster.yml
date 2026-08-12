@@ -1,0 +1,11 @@
+name: mge_cluster
+channels:
+  - bioconda
+  - conda-forge
+  - defaults
+dependencies:
+  - mge_cluster
+  - python=3.10
+  - pip
+  - pip:
+      - -r ../requirements.txt
