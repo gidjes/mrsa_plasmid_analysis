@@ -1,8 +1,12 @@
 samples_to_find.txt
+scripts/__pycache__/
 scripts/get_fastq.py
 scripts/BN_metadata.py
+scripts/qc_data_set.py
 fastqs/
 fastas/
 data/
 mrsa_plasmid_analysis.egg-info/
-scripts/__pycache__/
+mge_bootstrap/
+mashtree/
+results/

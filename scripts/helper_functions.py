@@ -1,25 +1,42 @@
 import pandas as pd
 import config
 
+# ---------------------------------------------------------
+# Declare variables
+# ---------------------------------------------------------
+ORIGIN_COL = config.ORIGIN_COL
+SPECIES_COL = config.SPECIES_COL
+ST_COL = config.ST_COL
+LA_COL = config.LA_COL
+SUBMITTER_TYPE = config.SUBMITTER_TYPE
+MEC_COL = config.MEC_COL
+
+CITY_COL = config.CITY_COL
+CITY_COL_BACKUP = config.CITY_COL_BACKUP
+PROVINCE_COL = config.PROVINCE_COL
+PROVINCE_COL_BACKUP = config.PROVINCE_COL_BACKUP
+DATE_COL = config.DATE_COL
+
 
 def infer_origin(df_in: pd.DataFrame) -> pd.DataFrame:
     # Default to 'MRSA'
     df = df_in.copy()
-    df["origin"] = "CA-MRSA"
+    df[ORIGIN_COL] = "CA-MRSA"
 
     # Update to 'LA-MRSA' where condition is met
-    df.loc[df[config.LA_COL] == "LA-MRSA", "origin"] = "LA-MRSA"
-    df.loc[df[config.ST_COL] == "1232", "origin"] = "CA-MRSA"
+    df.loc[df[LA_COL] == "LA-MRSA", ORIGIN_COL] = "LA-MRSA"
+    df.loc[df[ST_COL] == "1232", ORIGIN_COL] = "CA-MRSA"
     df.loc[
-        (df[config.SUBMITTER_TYPE] == "Ziekenhuis") & (df["origin"] != "LA-MRSA"),
-        "origin",
+        (df[SUBMITTER_TYPE] == "Ziekenhuis") & (df[ORIGIN_COL] != "LA-MRSA"),
+        ORIGIN_COL,
     ] = "HA-MRSA"
-    # df.loc[
-    #     (df[config.SUBMITTER_TYPE] == "Onbekend") & (df["origin"] != "LA-MRSA"),
-    #     "origin",
-    # ] = "HA-MRSA"
-    df.loc[df[config.SPECIES_COL] == "Staphylococcus schweitzeri", "origin"] = "Sar"
-    df.loc[df[config.SPECIES_COL] == "Staphylococcus argenteus", "origin"] = "Sar"
+    df.loc[df[MEC_COL] == "Negatief", ORIGIN_COL] = "MSSA"
+    df.loc[df[SPECIES_COL] == "Staphylococcus schweitzeri", ORIGIN_COL] = "Sar"
+    df.loc[df[SPECIES_COL] == "Staphylococcus argenteus", ORIGIN_COL] = "Sar"
+
+    df.loc[df[ORIGIN_COL] == "Sar", ST_COL] = (
+        df.loc[df[ORIGIN_COL] == "Sar", ST_COL] + "_sar"
+    )
 
     return df
 
@@ -62,11 +79,11 @@ def attach_municipalities(df_in):
 
 
 def infer_region(row):
-    city = row[config.CITY_COL]
-    province = row[config.PROVINCE_COL]
+    city = row[CITY_COL]
+    province = row[PROVINCE_COL]
     if city == "" or pd.isna(city):
-        city = row[config.CITY_COL_BACKUP]
-        province = row[config.PROVINCE_COL_BACKUP]
+        city = row[CITY_COL_BACKUP]
+        province = row[PROVINCE_COL_BACKUP]
     return city, province
 
 
@@ -106,8 +123,8 @@ def clean_plasmid_df(
         lambda x: 0 if pd.isna(x) else len(x.split(","))
     )
 
-    df_thresh[config.DATE_COL] = pd.to_datetime(
-        df_thresh[config.DATE_COL],
+    df_thresh[DATE_COL] = pd.to_datetime(
+        df_thresh[DATE_COL],
         dayfirst=True,
         errors="coerce",  # converts invalid/empty values to NaT
     )

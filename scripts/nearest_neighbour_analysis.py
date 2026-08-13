@@ -10,6 +10,16 @@ from helper_functions import lsf_hpcify_cmd
 import config
 from plotting_functions import plot_single_tangle
 
+# ---------------------------------------------------------
+# 5.0 Declare config variables
+# ---------------------------------------------------------
+ISOLATE_COL = config.ISOLATE_COL
+ST_COL = config.ST_COL
+SPECIES_COL = config.SPECIES_COL
+ORIGIN_COL = config.ORIGIN_COL
+MOBILITY_COL = config.MOBILITY_COL
+CLUSTER_COL = config.CLUSTER_COLS
+
 
 # ---------------------------------------------------------
 # 5.1.1 Run mashtree for a single cluster
@@ -177,10 +187,10 @@ def _analyse_cluster_neighbours(
     """
 
     meta_cols = [
-        config.ISOLATE_COL,
-        config.ST_COL,
-        config.SPECIES_COL,
-        config.ORIGIN_COL,
+        ISOLATE_COL,
+        ST_COL,
+        SPECIES_COL,
+        ORIGIN_COL,
     ]
 
     # Deduplicated isolate-level metadata
@@ -214,10 +224,10 @@ def _analyse_cluster_neighbours(
     pairs = pairs.merge(
         isolate_meta.rename(
             columns={
-                config.ISOLATE_COL: "outlier_isolate",
-                config.ST_COL: "outlier_st",
-                config.SPECIES_COL: "outlier_species",
-                config.ORIGIN_COL: "outlier_compartment",
+                ISOLATE_COL: "outlier_isolate",
+                ST_COL: "outlier_st",
+                SPECIES_COL: "outlier_species",
+                ORIGIN_COL: "outlier_compartment",
             }
         ),
         on="outlier_isolate",
@@ -230,10 +240,10 @@ def _analyse_cluster_neighbours(
     pairs = pairs.merge(
         isolate_meta.rename(
             columns={
-                config.ISOLATE_COL: "neighbour_isolate",
-                config.ST_COL: "neighbour_st",
-                config.SPECIES_COL: "neighbour_species",
-                config.ORIGIN_COL: "neighbour_compartment",
+                ISOLATE_COL: "neighbour_isolate",
+                ST_COL: "neighbour_st",
+                SPECIES_COL: "neighbour_species",
+                ORIGIN_COL: "neighbour_compartment",
             }
         ),
         on="neighbour_isolate",
@@ -461,8 +471,8 @@ def run_nearest_neighbour_analysis(
     ----------
     hgt_candidates_df : output of run_hgt_detection (columns: cluster, config.PLASMID_COL,
                         evidence_tier at minimum)
-    df_plasmids_clean : full plasmid metadata (must contain config.ISOLATE_COL,
-                        config.ST_COL, config.SPECIES_COL, config.ORIGIN_COL,
+    df_plasmids_clean : full plasmid metadata (must contain ISOLATE_COL,
+                        ST_COL, SPECIES_COL, ORIGIN_COL,
                         Standard_Cluster_mrsa)
     mash_quantile     : quantile of within-cluster Mash distances used as
                         neighbour cutoff (default 0.25 = lower quartile)
@@ -690,10 +700,10 @@ def run_nearest_neighbours_analysis_cluster(
         tangle_df,
         cluster_id,
         "bin_id",
-        config.ST_COL,
+        ST_COL,
         "group_width",
-        config.MOBILITY_COL,
-        config.ORIGIN_COL,
+        MOBILITY_COL,
+        ORIGIN_COL,
     )
 
 
@@ -701,7 +711,7 @@ def run_nearest_neighbours_analysis_cluster(
 # 5.2.3 Perfrom all the binning operations
 # ---------------------------------------------------------
 def run_nn_analysis(df_in: pd.DataFrame):
-    cluster_col = config.CLUSTER_COLS
+    cluster_col = CLUSTER_COLS
     df = df_in.copy()
     hgt_candidates = df[["Plasmid", cluster_col]]
     hgt_candidates["evidence_tier"] = "None"

@@ -13,6 +13,21 @@ import os
 import config
 import baltic as bt
 
+# ---------------------------------------------------------
+# Declare variables
+# ---------------------------------------------------------
+ORIGIN_COL = config.ORIGIN_COL
+SPECIES_COL = config.SPECIES_COL
+ST_COL = config.ST_COL
+
+CLUSTER_COL = config.CLUSTER_COL
+TSNE1D = config.TSNE1D
+TSNE2D = config.TSNE2D
+
+ORIGIN_PALETTE_FULL = config.ORIGIN_PALETTE_FULL
+ORIGIN_PALETTE = config.ORIGIN_PALETTE
+SPECIES_PALETTE = config.SPECIES_PALETTE
+
 
 # ---------------------------------------------------------
 # Palette functions
@@ -262,10 +277,10 @@ def plot_count_map(
     return ax
 
 
-def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = config.ORIGIN_COL):
-    cluster_col = config.CLUSTER_COL
-    species_col = config.SPECIES_COL
-    origin_col = config.ORIGIN_COL
+def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL):
+    cluster_col = CLUSTER_COL
+    species_col = SPECIES_COL
+    origin_col = ORIGIN_COL
 
     df = df_in.copy()
     geo_df = geo_df_in.copy()
@@ -317,7 +332,7 @@ def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = config.ORIGIN_CO
         plasmid_count,
         x="sampling_date",
         hue="Species",
-        palette=config.SPECIES_PALETTE,
+        palette=SPECIES_PALETTE,
         ax=ax1,
         bins=100,
         multiple="stack",
@@ -342,7 +357,7 @@ def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = config.ORIGIN_CO
         x=cluster_col,
         y="plasmid_count",
         hue=cluster_col,
-        palette=config.ORIGIN_PALETTE_FULL,
+        palette=ORIGIN_PALETTE_FULL,
         # split=True,
         bw_method=1,
         cut=0,
@@ -371,7 +386,7 @@ def glm_forest(
     term_labels=None,
     output_name="plasmid_count_forest_plot",
     figsize=(8.27, 11.69),
-    origin_col: str = config.ORIGIN_COL,
+    origin_col: str = ORIGIN_COL,
 ):
     """
     Publication-ready three-panel forest plot.
@@ -384,7 +399,7 @@ def glm_forest(
     The top panel spans the full width and is deliberately
     shorter than the two lower panels.
     """
-    cluster_col = config.CLUSTER_COL
+    cluster_col = CLUSTER_COL
 
     # =========================================================
     # Extract results
@@ -781,12 +796,12 @@ def add_ellipse(df, ax, column_name):
 
 def tsne_by_cluster(
     df_in: pd.DataFrame,
-    cluster_col: str = config.CLUSTER_COL,
-    tsne1D: str = config.TSNE1D,
-    tsne2D: str = config.TSNE2D,
+    cluster_col: str = CLUSTER_COL,
+    tsne1D: str = TSNE1D,
+    tsne2D: str = TSNE2D,
 ):
     df = df_in.copy()
-    origin_col = config.ORIGIN_COL
+    origin_col = ORIGIN_COL
 
     df = df.loc[df[cluster_col] != "-"]
     df[tsne1D] = pd.to_numeric(df[tsne1D], downcast="float", errors="coerce")
@@ -845,7 +860,7 @@ def tsne_by_cluster(
         y=tsne2D,
         hue=origin_col,
         alpha=0.5,
-        palette=config.ORIGIN_PALETTE,
+        palette=ORIGIN_PALETTE,
         legend=True,
         ax=ax2,
     )
@@ -883,9 +898,9 @@ def tsne_by_cluster(
 
 def composition_by_cluster(
     df_in,
-    cluster_col: str = config.CLUSTER_COL,
-    origin_col: str = config.ORIGIN_COL,
-    st_col: str = config.ST_COL,
+    cluster_col: str = CLUSTER_COL,
+    origin_col: str = ORIGIN_COL,
+    st_col: str = ST_COL,
 ):
     df = df_in.copy()
     df = df.loc[~df[cluster_col].isin(["-", "-1"])]
@@ -927,7 +942,7 @@ def composition_by_cluster(
         r"$\it{S. argenteus}$",
     ]
 
-    origin_palette = config.ORIGIN_PALETTE
+    origin_palette = ORIGIN_PALETTE
 
     df[cluster_col] = pd.Categorical(
         df[cluster_col],

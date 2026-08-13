@@ -7,28 +7,35 @@ import itertools
 import seaborn as sns
 import matplotlib.pyplot as plt
 from functools import partial
-from multiprocessing import set_start_method, Pool
+from multiprocessing import Pool
 from typing import Literal
 from sklearn.metrics.cluster import adjusted_rand_score
+
+
 import config
 from helper_functions import lsf_hpcify_cmd
 
+# ---------------------------------------------------------
+# 2.0 Declare config variables
+# ---------------------------------------------------------
+NJOBS = int(config.NJOBS)
 
+
+# ---------------------------------------------------------
+# 2.1 Create input file with fasta paths
+# ---------------------------------------------------------
 def create_input_file():
     fastas_dir = os.listdir("fastas")
     fastas = [x for x in fastas_dir if x.endswith(".fasta")]
-    # metadata_df = pd.read_csv("data/mrsa_plasmid_data.csv", sep=";")
-    # short_pls = metadata_df.loc[metadata_df["length"] >= 1000]
-    # fastas = [x for x in fastas if x.split(".fasta")[0] in short_pls["Plasmid"].values]
     fastas = [f"fastas/{x}" for x in fastas]
-    # rest = os.listdir("../gplas_bins")
-    # rest = [f"../gplas_bins/{x}" for x in rest]
-    # fastas += rest
     with open("mge_bootstrap/mge_input.txt", "w") as f:
         for fasta in fastas:
             f.write(f"{fasta}" + "\n")
 
 
+# ---------------------------------------------------------
+# 2.2.0 Create mge_cluster command
+# ---------------------------------------------------------
 def generate_mge_cmd(
     boot_param: Literal["perplexity", "clustersize"], boot_value: int
 ) -> str | None:
@@ -67,33 +74,34 @@ def generate_mge_cmd(
 
     # --- Construct command ---
     mge_cmd = f"{mge_cmd_base} {param} --outdir {outdir}"
-    print(mge_cmd)
 
-    # mge_cmd = lsf_hpcify_cmd(
-    #     mge_cmd, f"logs/mge_{boot_param}_{boot_value}.log", 12, 100, 120
-    # )
+    mge_cmd = lsf_hpcify_cmd(
+        mge_cmd, f"logs/mge_{boot_param}_{boot_value}.log", 12, 400, 3000
+    )
 
     return mge_cmd
 
 
+# ---------------------------------------------------------
+# 2.2.1 Create all bootstrap mge_cluster commands
+# ---------------------------------------------------------
 def bootstrap_mge_cluster(
     per_base: int = 30,
-    per_max: int = 400,
+    per_max: int = 500,
     per_inc: int = 5,
     cs_base: int = 5,
-    cs_max: int = 50,
+    cs_max: int = 100,
     cs_inc: int = 1,
 ):
-    ## Definie variables
-    # Perplexity
+    # Define variables
+    ## Perplexity
     perplexity_base = per_base
     perplexity_increment = per_inc
     perplexity_max = per_max
     perplexity_range = list(
         range(perplexity_base, perplexity_max + 1, perplexity_increment)
     )
-    print(perplexity_range)
-    # Clustersize
+    ## Clustersize
     clustersize_base = cs_base
     clustersize_increment = cs_inc
     clusterize_max = cs_max  # <- 50
@@ -114,13 +122,15 @@ def bootstrap_mge_cluster(
     mge_cmds = mge_cmd_cs + mge_cmd_plex
 
     # Run bootstrap iteration (in parallel)
-    n_jobs = config.NJOBS
+    n_jobs = NJOBS
     worker = partial(subprocess.call, shell=True, stderr=subprocess.STDOUT)
     with Pool(processes=n_jobs, maxtasksperchild=1) as pool:
         pool.map(worker, mge_cmds)
-    return None
 
 
+# ---------------------------------------------------------
+# 2.3.1 Mark output file with bootstrap name
+# ---------------------------------------------------------
 def open_and_mark(input_file_path: str, marker: str) -> pd.DataFrame:
     """
     Function to open a mge clustering file and mark it with the bootstrap name
@@ -143,6 +153,9 @@ def open_and_mark(input_file_path: str, marker: str) -> pd.DataFrame:
     return df[f"{marker}"]
 
 
+# ---------------------------------------------------------
+# 2.3.2 Caclulate rand index between iterations
+# ---------------------------------------------------------
 def bootstrap_rand(
     parameter: Literal["perplexity", "clustersize"],
     # key_col: str,
@@ -210,11 +223,14 @@ def bootstrap_rand(
     return best_parameter
 
 
+# ---------------------------------------------------------
+# 2.4 Run optimised mge-cluster
+# ---------------------------------------------------------
 def optimised_mge(perplexity, clustersize):
     base = "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 8 --outdir mge_bootstrap/final_model"
     params = f"--min_cluster {clustersize} --perplexity {perplexity}"
     if not os.path.exists("mge_bootstrap/final_model/"):
         os.makedirs("mge_bootstrap/final_model")
     cmd = f"{base} {params}"
-    # cmd = lsf_hpcify_cmd(f"{cmd}", f"logs/mge/mge_optimised.log", 12, 100, 120)
+    cmd = lsf_hpcify_cmd(f"{cmd}", f"logs/mge/mge_optimised.log", 12, 400, 3000)
     subprocess.call(f"{cmd}", shell=True, stderr=subprocess.STDOUT)

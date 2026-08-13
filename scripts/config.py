@@ -2,7 +2,7 @@
 
 # Column names
 ## General
-NJOBS = 1
+NJOBS = 50
 
 ## Meta cols
 PLASMID_COL = "Plasmid"
@@ -11,6 +11,7 @@ ID_COL = "PERSON_UNIFIEDPERSONID"
 SPECIES_COL = "ISOLATE_TL_SPECIES"
 ST_COL = "ISOLATE_TL_MLST_ST"
 LA_COL = "ISOLATE_TL_SA_CLASS"
+MEC_COL = "ISOLATE_TL_PCR_MEC"
 ORIGIN_COL = "origin"
 
 ## Genome cols

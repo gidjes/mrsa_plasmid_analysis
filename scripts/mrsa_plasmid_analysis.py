@@ -9,6 +9,9 @@ import nearest_neighbour_analysis
 import bin_dynamics
 from helper_functions import clean_plasmid_df
 
+NJOBS = config.NJOBS
+CLUSTER_COL = config.CLUSTER_COL
+
 
 def mrsa_plasmid_analysis():
     # ---------------------------------------------------------
@@ -60,11 +63,11 @@ def mrsa_plasmid_analysis():
     # ---------------------------------------------------------
     # 3. Population description
     # ---------------------------------------------------------
-    genome_df = pd.read_csv("data/PlasmidNL_report.csv", sep=";")
+    genome_df = pd.read_csv("data/genome_data.csv", sep=";")
     plasmid_df = genome_df.merge(
         metadata_df, left_on="Parent", right_on="Isolate_ID", how="left"
     )
-    clustering_df = pd.read_csv("data/clustering.csv")
+    clustering_df = pd.read_csv("mge_bootstrap/final_model/mge-cluster_results.csv")
     plasmid_df = clean_plasmid_df(metadata_df, clustering_df)
     population_description.dataset_overview(plasmid_df)
 
@@ -76,9 +79,7 @@ def mrsa_plasmid_analysis():
     # ---------------------------------------------------------
     # 5. Nearly-identical plasmid analysis
     # ---------------------------------------------------------
-    nearest_neighbour_analysis.mashtree_builder(
-        plasmid_df, config.NJOBS, config.CLUSTER_COL
-    )
+    nearest_neighbour_analysis.mashtree_builder(plasmid_df, NJOBS, CLUSTER_COL)
     bin_dynamics.bin_post_hoc(plasmid_df)
 
 
