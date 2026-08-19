@@ -5,6 +5,7 @@ scripts/BN_metadata.py
 scripts/qc_data_set.py
 fastqs/
 fastas/
+fastas_chr/
 data/
 mrsa_plasmid_analysis.egg-info/
 mge_bootstrap/

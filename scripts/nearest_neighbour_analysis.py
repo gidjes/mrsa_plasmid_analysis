@@ -46,7 +46,7 @@ def run_mashtree(cluster, df_in, cluster_col):
     fastas_chr = list(set(fastas_chr))
     path_chr = f"mashtree/{cluster}/chr"
     os.makedirs(path_chr, exist_ok=True)
-    [shutil.copy2(f"fastas_chr/{x}.fasta", f"{path_pls}") for x in fastas]
+    [shutil.copy2(f"fastas_chr/{x}.fasta", f"{path_chr}") for x in fastas_chr]
     mash_tree_cmd_chr = f"conda run -n mash_master mashtree --mindepth 0 --numcpus 12 {path_chr}/*.fasta > mashtree/{cluster}_chr_tree.dnd"
     mash_tree_cmd_chr = lsf_hpcify_cmd(
         mash_tree_cmd_chr, f"logs/mashtree/logs/{cluster}_chr_mash.log", 12, 200, 3600

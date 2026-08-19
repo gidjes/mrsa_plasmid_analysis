@@ -14,6 +14,14 @@ CLUSTER_COL = config.CLUSTER_COL
 
 
 def mrsa_plasmid_analysis():
+    """
+    Running function for all components included in the paper:
+    1. Verify all required files exist
+    2. Mge-cluster bootstrap to create scheme
+    3. General population statistics/description
+    4. Cluster statistics/description
+    5. Nearly-identical neighbour analysis
+    """
     # ---------------------------------------------------------
     # 1. Verify fastas + metadata
     # ---------------------------------------------------------
@@ -52,34 +60,48 @@ def mrsa_plasmid_analysis():
     # ---------------------------------------------------------
     # 2. mge-bootstrap -> create scheme
     # ---------------------------------------------------------
+    # Make required directories
     os.makedirs("logs/mge/", exist_ok=True)
     os.makedirs("mge_bootstrap/", exist_ok=True)
+
+    # Run the bootstrap optimiser
     mge_bootstrap.create_input_file()
     mge_bootstrap.bootstrap_mge_cluster()
+
+    # Get optimised paramter values
     perplexity = mge_bootstrap.bootstrap_rand("perplexity")
     clustersize = mge_bootstrap.bootstrap_rand("clustersize")
+
+    # Perform optimised mge-cluster
     mge_bootstrap.optimised_mge(perplexity, clustersize)
 
     # ---------------------------------------------------------
     # 3. Population description
     # ---------------------------------------------------------
+    # Load and clean required files
     genome_df = pd.read_csv("data/genome_data.csv", sep=";")
     plasmid_df = genome_df.merge(
         metadata_df, left_on="Parent", right_on="Isolate_ID", how="left"
     )
     clustering_df = pd.read_csv("mge_bootstrap/final_model/mge-cluster_results.csv")
     plasmid_df = clean_plasmid_df(metadata_df, clustering_df)
+
+    # Run population-level analysis
     population_description.dataset_overview(plasmid_df)
 
     # ---------------------------------------------------------
     # 4. Scheme / cluster-level description
     # ---------------------------------------------------------
+    # Run cluster-level analysis
     population_description.cluster_overview(plasmid_df)
 
     # ---------------------------------------------------------
     # 5. Nearly-identical plasmid analysis
     # ---------------------------------------------------------
+    # Calculate mash distances and create phylogenetic trees
     nearest_neighbour_analysis.mashtree_builder(plasmid_df, NJOBS, CLUSTER_COL)
+
+    # Run sequence-level analysis
     bin_dynamics.bin_post_hoc(plasmid_df)
 
 

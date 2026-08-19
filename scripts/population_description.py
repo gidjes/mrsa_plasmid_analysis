@@ -1119,7 +1119,7 @@ def cluster_overview(df_in: pd.DataFrame):
     for col in ["origin", "replicon", "mobility", "AMR_plasmid"]:
         table = count_column_composition_by_cluster(
             df_in=df,
-            column_col="country",
+            column_col=col,
             split=True,
         )
         table.to_csv(f"{out_path}/{col}_cluster_counts.csv", sep=";")
