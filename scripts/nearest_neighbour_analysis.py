@@ -18,7 +18,7 @@ ST_COL = config.ST_COL
 SPECIES_COL = config.SPECIES_COL
 ORIGIN_COL = config.ORIGIN_COL
 MOBILITY_COL = config.MOBILITY_COL
-CLUSTER_COL = config.CLUSTER_COLS
+CLUSTER_COL = config.CLUSTER_COL
 
 
 # ---------------------------------------------------------
@@ -74,7 +74,7 @@ def mashtree_builder(df_in: pd.DataFrame, n_jobs: int, cluster_col: str):
 # ---------------------------------------------------------
 # 5.2.0 Helper functions
 # ---------------------------------------------------------
-def _load_mash(cluster: str, mode: str = "pls") -> Optional[pd.DataFrame]:
+def _load_mash(cluster: str, mode: str = "pls") -> pd.DataFrame:
     path = Path(f"output/mash/dist/{cluster}_{mode}_mash_dist.tsv")
     if not path.exists():
         return None
@@ -90,7 +90,7 @@ def _load_mash(cluster: str, mode: str = "pls") -> Optional[pd.DataFrame]:
     return df
 
 
-def _load_wgmlst(cluster: str, group: pd.DataFrame) -> Optional[pd.DataFrame]:
+def _load_wgmlst(cluster: str, group: pd.DataFrame) -> pd.DataFrame:
     # Always load chromosome Mash
     mash_df = _load_mash(cluster, mode="chr")
     if mash_df is None:
@@ -177,7 +177,7 @@ def _analyse_cluster_neighbours(
     evidence_tiers: pd.Series,  # aligned evidence tiers
     cluster_meta: pd.DataFrame,  # plasmid metadata for this cluster
     mash_df: pd.DataFrame,
-    wgmlst_long: Optional[pd.DataFrame],
+    wgmlst_long: pd.DataFrame,
     mash_cutoff: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """

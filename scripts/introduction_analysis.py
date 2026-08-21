@@ -83,10 +83,6 @@
 #
 # Integration
 # -----------
-.
-
-# Integration
-# -----------
 # Call run_introduction_analysis() from aggregate_and_report()
 # after existing sub-analyses. Requires:
 #   plasmid_df with bin_id already merged [F2]

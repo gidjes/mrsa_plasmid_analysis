@@ -83,14 +83,15 @@ def qc_set():
     directory_b = Path("../../fastas/RIVM/mrsa")
 
     # Backup pair
-    directory_e = Path("../../fastas/RIVM/cpe_chr")
-    directory_f = Path("../../fastas/RIVM/cpe")
+    directory_e = Path("../../plasmid_reconstruction/output/isolate_fastas")
+    directory_f = Path("../../plasmid_reconstruction/output/final_results")
 
     # Output directories
     directory_c = Path("fastas_chr/")
     directory_d = Path("fastas")
 
     missing_csv = Path("data/missing_pairs.csv")
+    no_plasmids_csv = Path("data/isolates_without_plasmids.csv")
 
     directory_c.mkdir(parents=True, exist_ok=True)
     directory_d.mkdir(parents=True, exist_ok=True)
@@ -105,8 +106,22 @@ def qc_set():
     )
 
     bn_metadata = bn_metadata.loc[bn_metadata["ISOLATE_BN_NGS_STATUS"] == "Vrijgegeven"]
+    bn_metadata = bn_metadata.loc[
+        bn_metadata["ISOLATE_BN_STATUS_DATA"] == "In Type-Ned"
+    ]
+    bn_metadata = bn_metadata.loc[bn_metadata["ISOLATE_BN_STATUS"] != "Verontreinigd"]
+    bn_metadata = bn_metadata.loc[
+        ~bn_metadata["ISOLATE_TL_SPECIES"].isin(
+            ["Acinetobacter baumannii ", "Klebsiella pneumoniae "]
+        )
+    ]
+    bn_metadata["MATERIAL_SAMPLINGDATE"] = pd.to_datetime(
+        bn_metadata["MATERIAL_SAMPLINGDATE"], dayfirst=True, errors="coerce"
+    )
+    bn_metadata = bn_metadata.loc[bn_metadata["MATERIAL_SAMPLINGDATE"] < "1-8-2026"]
 
     keys = bn_metadata["KEY"].dropna().astype(str).unique().tolist()
+    keys = [key for key in keys if not key.startswith("19")]
 
     print(f"Number of unique keys: {len(keys)}")
 
@@ -219,6 +234,39 @@ def qc_set():
 
             continue
 
+        # ---------------------------------------------------------
+        # Identify isolates from directory E with no plasmids
+        # ---------------------------------------------------------
+        no_plasmids = []
+
+        for key in keys:
+            e_files = files_e.get(key, [])
+
+            # Only consider isolates that actually have a chromosome
+            # FASTA in directory E
+            if not e_files:
+                continue
+
+            b_prefix = key.split("_", 1)[0]
+            f_matching = files_f.get(b_prefix, [])
+
+            if not f_matching:
+                no_plasmids.append(
+                    {
+                        "KEY": key,
+                        "chromosome_file": ";".join(str(path) for path in e_files),
+                        "plasmid_count": 0,
+                    }
+                )
+
+        no_plasmids_df = pd.DataFrame(no_plasmids)
+
+        no_plasmids_df.to_csv(
+            no_plasmids_csv,
+            sep=";",
+            index=False,
+        )
+
         # -----------------------------------------------------
         # No complete pair
         # -----------------------------------------------------
@@ -260,17 +308,20 @@ def qc_set():
 
     print("\nResults")
     print("-------")
-    print(f"Total keys:             {len(keys)}")
-    print(f"Complete A+B pairs:     {primary_count}")
-    print(f"Complete E+F pairs:     {backup_count}")
-    print(f"Missing complete pairs: {len(missing)}")
-    print(f"Missing report:         {missing_csv}")
+    print(f"Total keys:                                 {len(keys)}")
+    print(f"Complete A+B pairs:                         {primary_count}")
+    print(f"Complete E+F pairs:                         {backup_count}")
+    print(f"Missing complete pairs:                     {len(missing)}")
+    print(f"Missing report:                             {missing_csv}")
+    print(f"Isolates from directory E with no plasmids: {len(no_plasmids)}")
+    print(f"No-plasmid report:                          {no_plasmids_csv}")
 
     # ---------------------------------------------------------
     # Reduce metadata to keys with a complete pair
     # ---------------------------------------------------------
 
     found_keys = {pair["KEY"] for pair in paired}
+    found_keys += no_plasmids
 
     bn_metadata = bn_metadata[bn_metadata["KEY"].isin(found_keys)].copy()
 
@@ -282,6 +333,8 @@ def qc_set():
         "ISOLATE_TL_SPECIES",
         "ISOLATE_TL_MLST_ST",
         "ISOLATE_TL_PCR_MEC",
+        "ISOLATE_TL_PCR_PVL",
+        "ISOLATE_TL_SA_CLASS",
         "MATERIAL_SUBMITTER",
         "MATERIAL_SUBMITTER_CITY",
         "MATERIAL_SUBMITTER_PROVINCE",
@@ -289,7 +342,7 @@ def qc_set():
         "MATERIAL_SAMPLINGDATE",
         "PERSON_CITY",
         "PERSON_PROVINCE",
-        "ISOLATE_TL_SA_CLASS",
+        "PERSON_UNIFIEDPERSONID",
         "EPI_COUNTRY",
     ]
 
@@ -299,9 +352,11 @@ def qc_set():
         index=False,
     )
 
-    metadata_old = pd.read_csv("data/old_mrsa_PlasmidNL.csv", sep=";")
+    metadata_old = pd.read_csv("../../metadata/RIVM/mrsa/mrsa_plasmidNL.csv", sep=";")
     metadata_old = metadata_old[metadata_old["Parent"].isin(found_keys)].copy()
-    metadata_new = pd.read_csv("data/new_mrsa_PlasmidNL.csv", sep=";")
+    metadata_new = pd.read_csv(
+        "../../PlasmidNL_typing_public/PlasmidNL_report.csv", sep=";"
+    )
     metadata_new = metadata_new[metadata_new["Parent"].isin(found_keys)].copy()
     genome_data = pd.concat([metadata_old, metadata_new])
     genome_data.to_csv(

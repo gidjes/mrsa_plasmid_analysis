@@ -45,7 +45,7 @@ def generate_mge_cmd(
     """
 
     mge_cmd_base = (
-        "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 8"
+        "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 12"
     )
 
     # --- Set parameter and directories ---
@@ -76,7 +76,7 @@ def generate_mge_cmd(
     mge_cmd = f"{mge_cmd_base} {param} --outdir {outdir}"
 
     mge_cmd = lsf_hpcify_cmd(
-        mge_cmd, f"logs/mge_{boot_param}_{boot_value}.log", 12, 400, 3000
+        mge_cmd, f"logs/mge_bootstrap/{boot_param}_{boot_value}.log", 12, 400, 3000
     )
 
     return mge_cmd
@@ -227,10 +227,10 @@ def bootstrap_rand(
 # 2.4 Run optimised mge-cluster
 # ---------------------------------------------------------
 def optimised_mge(perplexity, clustersize):
-    base = "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 8 --outdir mge_bootstrap/final_model"
+    base = "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 12 --outdir mge_bootstrap/final_model"
     params = f"--min_cluster {clustersize} --perplexity {perplexity}"
     if not os.path.exists("mge_bootstrap/final_model/"):
         os.makedirs("mge_bootstrap/final_model")
     cmd = f"{base} {params}"
-    cmd = lsf_hpcify_cmd(f"{cmd}", f"logs/mge/mge_optimised.log", 12, 400, 3000)
+    cmd = lsf_hpcify_cmd(f"{cmd}", f"logs/mge/optimised.log", 12, 400, 3000)
     subprocess.call(f"{cmd}", shell=True, stderr=subprocess.STDOUT)

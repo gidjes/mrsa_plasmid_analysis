@@ -24,6 +24,19 @@ import plotting_functions as plot
 # 3.1.0 Helper Functions
 # ---------------------------------------------------------
 def plot_population(df_in: pd.DataFrame):
+    """
+    Helper function to plot the output from the population
+    statistics. Loads and readies map files/geojson
+
+    Key output
+    ----------
+    Figure 1 - isolate data
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Dataframe containing plasmid metadata
+    """
     parent_df = df_in[
         [config.PARENT_COL, "city", "municipality", "province"]
     ].drop_duplicates()
@@ -989,8 +1002,9 @@ def gene_spillover_analysis(
 # ---------------------------------------------------------
 # 3.1 Dataset Overview
 # ---------------------------------------------------------
-def dataset_overview(df_in: pd.DataFrame):
-    df = df_in.copy()
+def dataset_overview(df_plasmids_in: pd.DataFrame, df_metadata_in: pd.DataFrame):
+    df_plasmids = df_plasmids_in.copy()
+
     out_path = "results/dataset_overview"
     os.makedirs(out_path, exist_ok=True)
     gene_columns = [
@@ -1004,18 +1018,18 @@ def dataset_overview(df_in: pd.DataFrame):
     # 3.1.1 Simple counts
     # ---------------------------------------------------------
     # Iso count
-    n_isolates = df[config.PARENT_COL].nunique()
-    n_people = df[config.ID_COL].nunique()
-    n_plasmids = df[config.PLASMID_COL].nunique()
+    n_isolates = df_plasmids[config.PARENT_COL].nunique()
+    n_people = df_plasmids[config.ID_COL].nunique()
+    n_plasmids = df_plasmids[config.PLASMID_COL].nunique()
 
     # Temporal
-    start_date = df[config.DATE_COL].min()
-    end_date = df[config.DATE_COL].max()
+    start_date = df_plasmids[config.DATE_COL].min()
+    end_date = df_plasmids[config.DATE_COL].max()
 
     # Geo
-    n_cities = df["city"].nunique()
-    n_municipalities = df["municipality"].nunique()
-    n_provinces = df["province"].nunique()
+    n_cities = df_plasmids["city"].nunique()
+    n_municipalities = df_plasmids["municipality"].nunique()
+    n_provinces = df_plasmids["province"].nunique()
     with open(f"{out_path}/output.txt", "w") as f:
         f.write(f"n_isolates = {n_isolates}\n")
         f.write(f"n_patients = {n_people}\n")
@@ -1032,40 +1046,40 @@ def dataset_overview(df_in: pd.DataFrame):
     # 3.1.2 Data distribution
     # ---------------------------------------------------------
     # Epi origin
-    origin = count_column_composition(df, "origin", False)
+    origin = count_column_composition(df_plasmids, "origin", False)
     origin.to_csv(f"{out_path}/origin_distribution.csv", sep=";")
 
     # Species origin
-    species = count_column_composition(df, config.SPECIES_COL, False)
+    species = count_column_composition(df_plasmids, config.SPECIES_COL, False)
     species.to_csv(f"{out_path}/species_distribution.csv", sep=";")
 
     # ---------------------------------------------------------
     # 3.1.3 Plasmid carriage statistics
     # ---------------------------------------------------------
-    plasmid_carriage_counting(df)
-    plot_population(df)
+    plasmid_carriage_counting(df_plasmids)
+    plot_population(df_plasmids)
 
     # ---------------------------------------------------------
     # 3.1.4 Functional gene analysis
     # ---------------------------------------------------------
     # Mobility
-    mobility = count_column_composition(df, "mobility", False)
+    mobility = count_column_composition(df_plasmids, "mobility", False)
     mobility.to_csv(f"{out_path}/mobility_distribution.csv", sep=";")
 
     # Replicon
-    replicon_full = count_column_composition(df, "replicon", False)
+    replicon_full = count_column_composition(df_plasmids, "replicon", False)
     replicon_full.to_csv(f"{out_path}/replicon_full_distribution.csv", sep=";")
-    replicon = count_column_composition(df, "replicon", True)
+    replicon = count_column_composition(df_plasmids, "replicon", True)
     replicon.to_csv(f"{out_path}/replicon_distribution.csv", sep=";")
 
     # Functional genes
     for col in gene_columns:
-        col_presence = count_column_composition(df, f"{col}_plasmid", False)
+        col_presence = count_column_composition(df_plasmids, f"{col}_plasmid", False)
         col_presence.to_csv(f"{out_path}/{col}_presence_distribution.csv", sep=";")
-        colgenes = count_column_composition(df, f"{col}", True)
+        colgenes = count_column_composition(df_plasmids, f"{col}", True)
         colgenes.to_csv(f"{out_path}/{col}_gene_distribution.csv", sep=";")
 
-    gene_statics = gene_origin_enrichment(df)
+    gene_statics = gene_origin_enrichment(df_plasmids)
     gene_statics.to_csv(f"results/tables/tableS3_gene_distribution.csv", sep=";")
 
 
@@ -1132,10 +1146,10 @@ def cluster_overview(df_in: pd.DataFrame):
     composition_dict = compartment_plasmidome_dispersion(df_clustered)
     with open(f"{out_path}/cluster_stats.txt", "a") as f:
         f.write(f"Cluster composition output:\n")
-        f.write(f"global_permanova:    {composition_dict["global_permanova"]}\n")
-        f.write(f"pairwise_permanova:  {composition_dict["pairwise_permanova"]}\n")
-        f.write(f"dispersion_summary:  {composition_dict["dispersion_summary"]}\n")
-        f.write(f"dispersion_pairwise: {composition_dict["dispersion_pairwise"]}\n")
+        f.write(f"global_permanova:    {composition_dict['global_permanova']}\n")
+        f.write(f"pairwise_permanova:  {composition_dict['pairwise_permanova']}\n")
+        f.write(f"dispersion_summary:  {composition_dict['dispersion_summary']}\n")
+        f.write(f"dispersion_pairwise: {composition_dict['dispersion_pairwise']}\n")
         f.write("\n")
 
     # ---------------------------------------------------------
