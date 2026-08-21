@@ -25,6 +25,11 @@ NJOBS = int(config.NJOBS)
 # 2.1 Create input file with fasta paths
 # ---------------------------------------------------------
 def create_input_file():
+    """
+    Create the input txt file of sequence paths to be used
+    by mge-cluster. Generated for all input in the fastas
+    directory in the project directory.
+    """
     fastas_dir = os.listdir("fastas")
     fastas = [x for x in fastas_dir if x.endswith(".fasta")]
     fastas = [f"fastas/{x}" for x in fastas]
@@ -41,14 +46,27 @@ def generate_mge_cmd(
 ) -> str | None:
     """
     Generate a single bash command for mge_cluster, unless the expected output
-    file already exists. If the output exists, return None to skip rerunning.
+    file already exists. If the output exists the function skips.
+
+    Parameters
+    ----------
+    boot_param : Literal['perplexity', 'clustersize']
+        parameter name for this bootstrap iteration
+    boot_value : int
+        parameter value for this bootstrap iteration
+
+    Returns
+    -------
+    str | None
+        mge-cluster bash commandline string to be run. None if already
+        completed
     """
 
     mge_cmd_base = (
         "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 12"
     )
 
-    # --- Set parameter and directories ---
+    # Set parameter, values and create directories
     if boot_param == "perplexity":
         param = f"--perplexity {boot_value}"
         sub_name = "perplex"
@@ -59,22 +77,22 @@ def generate_mge_cmd(
         outdir = f"mge_bootstrap/{boot_param}/{sub_name}_{boot_value}/"
     else:
         print("Incorrect parameter chosen for bootstrap.")
+        print("Currently available: perplexity or clustersize")
         exit()
 
-    # --- Output file to check ---
+    # Output file to check
     final_output = os.path.join(outdir, "mge-cluster_results.csv")
 
-    # --- Skip if final output already exists ---
+    # Skip if final output already exists
     if os.path.exists(final_output):
         print(f"Skipping {outdir}: results already exist.")
         return None
 
-    # --- Ensure directory exists ---
+    # Ensure directory exists
     os.makedirs(outdir, exist_ok=True)
 
-    # --- Construct command ---
+    # Construct command
     mge_cmd = f"{mge_cmd_base} {param} --outdir {outdir}"
-
     mge_cmd = lsf_hpcify_cmd(
         mge_cmd, f"logs/mge_bootstrap/{boot_param}_{boot_value}.log", 12, 400, 3000
     )
@@ -93,6 +111,26 @@ def bootstrap_mge_cluster(
     cs_max: int = 100,
     cs_inc: int = 1,
 ):
+    """
+    Run the bootstrap for mge-cluster to optimise the perplexity
+    and cluster size parameters. Generates command line code and
+    runs it (in parrallel) through subprocess.
+
+    Parameters
+    ----------
+    per_base : int, optional
+        lower bound perplexity to iterate from, by default 30
+    per_max : int, optional
+        upper bound perplexity to iterate to, by default 500
+    per_inc : int, optional
+        value to increment the perplexity iterations with, by default 5
+    cs_base : int, optional
+        lower bound cluster size to iterate from, by default 5
+    cs_max : int, optional
+        upper bound cluster size to iterate to, by default 100
+    cs_inc : int, optional
+        value to increment the cluster size iterations with, by default 1
+    """
     # Define variables
     ## Perplexity
     perplexity_base = per_base
@@ -108,7 +146,6 @@ def bootstrap_mge_cluster(
     clustersize_range = list(
         range(clustersize_base, clusterize_max + 1, clustersize_increment)
     )
-    print(clustersize_range)
 
     # Generate commandline strings
     mge_cmd_cs = [
@@ -158,21 +195,20 @@ def open_and_mark(input_file_path: str, marker: str) -> pd.DataFrame:
 # ---------------------------------------------------------
 def bootstrap_rand(
     parameter: Literal["perplexity", "clustersize"],
-    # key_col: str,
-    # cluster_col: str,
-):
-    """function to calculate the rand index for the bootstrap of a parameter value
+) -> int:
+    """
+    Calculate the rand index between the bootstrap iterations of a
+    parameter value
 
     Parameters
     ----------
-    input_path : str
-        path/to/input/dir/
-    filename : str
-        name of the file containing the cluster
-    key_col : str
-        column name containing the key/seq names
-    cluster_col : str
-        column name where the clusters are stored
+    parameter : Literal['perplexity', 'clustersize']
+        parameter to assess
+
+    Returns
+    -------
+    int
+        parameter value with highest mean rand index value
     """
     # Open clustering files and concat to single df
     boots = os.listdir(parameter)
@@ -217,20 +253,44 @@ def bootstrap_rand(
         linecolor="white",
         linewidth="0.5",
     ).set(title=f"{parameter}")
+
+    # Save data files
     plt.savefig(f"mge_bootstrap/{parameter}_ARI.png")
     plt.clf()
     ari_matrix.to_csv(f"mge_bootstrap/{parameter}_ARI.csv", sep=";")
+
+    # Return the parameter value to use
     return best_parameter
 
 
 # ---------------------------------------------------------
 # 2.4 Run optimised mge-cluster
 # ---------------------------------------------------------
-def optimised_mge(perplexity, clustersize):
+def optimised_mge(perplexity: int, clustersize: int):
+    """
+    Runner to run the optimised mge-cluster version after
+    the booststrap
+
+    Parameters
+    ----------
+    perplexity : int
+        perplexity value to use
+    clustersize : int
+        cluster size value to use
+    """
+    # Base command string
     base = "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 12 --outdir mge_bootstrap/final_model"
+
+    # Set optimised parameter values
     params = f"--min_cluster {clustersize} --perplexity {perplexity}"
+
+    # Create directory
     if not os.path.exists("mge_bootstrap/final_model/"):
         os.makedirs("mge_bootstrap/final_model")
+
+    # Combine command string
     cmd = f"{base} {params}"
     cmd = lsf_hpcify_cmd(f"{cmd}", f"logs/mge/optimised.log", 12, 400, 3000)
+
+    # Run
     subprocess.call(f"{cmd}", shell=True, stderr=subprocess.STDOUT)
