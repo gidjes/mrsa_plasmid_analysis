@@ -28,7 +28,7 @@ def plot_population(df_in: pd.DataFrame):
     Helper function to plot the output from the population
     statistics. Loads and readies map files/geojson
 
-    Key output
+    Key outputs
     ----------
     Figure 1 - isolate data
 
@@ -160,6 +160,7 @@ def save_glm_tables(
         .round(3)
     )
 
+    # Save table A: Model descriptives
     model_info.to_csv(
         f"results/tables/{name}_A.csv",
         sep=";",
@@ -186,16 +187,11 @@ def save_glm_tables(
     # Remove intercept
     results = results[results["Term"] != "Intercept"].copy()
 
-    # ---------------------------------------------------------
     # Make term names readable
-    # ---------------------------------------------------------
-
     def clean_term(term):
-
         term = term.replace("C(origin)[T.", "")
         term = term.replace("C(ST_collapsed)[T.", "")
         term = term.replace("]", "")
-
         return term
 
     results["Term"] = results["Term"].apply(clean_term)
@@ -203,14 +199,9 @@ def save_glm_tables(
     if term_labels is not None:
         results["Term"] = results["Term"].replace(term_labels)
 
-    # ---------------------------------------------------------
     # Add reference categories
-    # ---------------------------------------------------------
-
     reference_rows = []
-
     for variable, category in reference_categories.items():
-
         variable_label = {
             "origin": "Origin",
             "ST_collapsed": "ST",
@@ -229,22 +220,17 @@ def save_glm_tables(
         )
 
     reference_df = pd.DataFrame(reference_rows)
-
     results = pd.concat(
         [reference_df, results],
         ignore_index=True,
     )
 
-    # ---------------------------------------------------------
     # Format values
-    # ---------------------------------------------------------
-
     results["IRR"] = results["IRR"].round(3)
     results["SE"] = results["SE"].round(3)
     results["z"] = results["z"].round(3)
     results["CI_lower"] = results["CI_lower"].round(3)
     results["CI_upper"] = results["CI_upper"].round(3)
-
     results["P_value"] = results["P_value"].apply(
         lambda x: ("" if pd.isna(x) else "<0.001" if x < 0.001 else f"{x:.3f}")
     )
@@ -258,6 +244,7 @@ def save_glm_tables(
         }
     )
 
+    # Save table B: Model outcome
     results.to_csv(
         f"results/tables/{name}_B.csv",
         sep=";",
@@ -267,12 +254,26 @@ def save_glm_tables(
     return model_info, results
 
 
-def plasmid_carriage_counting(df_in):
+def plasmid_carriage_counting(df_in: pd.DataFrame):
+    """
+    Descriptive statistics on the number of plasmids carried by
+    isolates
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        dataframe with plasmid metadata
+
+    Key outputs
+    ----------
+    Figure 2 - Plasmid carriage forest plot
+    Table S1 - Poisson model Plasmids_n ~ origin
+    Table S2 - Poisson model Plasmids_n ~ ST
+    Table S3 - Poisson model Plasmids_n ~ ST + origin
+    """
     df = df_in.copy()
 
-    # ---------------------------------------------------------
-    # 1. Create isolate-level data
-    # ---------------------------------------------------------
+    # Create isolate-level data
     isolate_df = df[
         [
             "Parent",
@@ -281,9 +282,7 @@ def plasmid_carriage_counting(df_in):
         ]
     ].drop_duplicates()
 
-    # ---------------------------------------------------------
-    # 2. Determine common STs based on NUMBER OF ISOLATES
-    # ---------------------------------------------------------
+    # Determine significant/common STs based on the number of isolates
     isolate_st_counts = isolate_df["ISOLATE_TL_MLST_ST"].value_counts()
     common_STs = isolate_st_counts[isolate_st_counts >= 10].index
     isolate_df["ST_collapsed"] = isolate_df["ISOLATE_TL_MLST_ST"].where(
@@ -291,35 +290,34 @@ def plasmid_carriage_counting(df_in):
         "rare_ST",
     )
 
-    # ---------------------------------------------------------
-    # 3. Count plasmids per isolate
-    # ---------------------------------------------------------
+    # Count plasmids per isolate
     plasmid_counts = df.groupby("Parent").size().reset_index(name="plasmid_count")
 
-    # ---------------------------------------------------------
-    # 4. Combine plasmid count with isolate metadata
-    # ---------------------------------------------------------
+    # Combine plasmid count with isolate metadata
     analysis_df = isolate_df.merge(
         plasmid_counts,
         on="Parent",
         how="left",
     )
+
+    # Add the 0-plasmid isolates
+    no_plasmids = pd.read_csv("data/isolates_without_plasmids.csv", sep=";")
+    no_plasmids["plasmid_count"] = 0
+    analysis_df = pd.concat([analysis_df, no_plasmids])
+
+    # Sanity check
     print(analysis_df)
     print(analysis_df["plasmid_count"].describe())
     print(analysis_df.groupby("origin")["plasmid_count"].describe())
 
-    # ---------------------------------------------------------
-    # 5. Save counts
-    # ---------------------------------------------------------
+    # Save counts
     analysis_df.to_csv(
-        "plasmid_counts_per_isolate.csv",
+        "results/plasmid_counts_per_isolate.csv",
         sep=";",
         index=False,
     )
 
-    # ---------------------------------------------------------
-    # 6. Model: plasmid count ~ origin
-    # ---------------------------------------------------------
+    # Model 1: plasmid count ~ origin
     model_origin = smf.glm(
         "plasmid_count ~ C(origin)",
         data=analysis_df,
@@ -327,8 +325,6 @@ def plasmid_carriage_counting(df_in):
     ).fit()
 
     pearson_dispersion = sum(model_origin.resid_pearson**2) / model_origin.df_resid
-    print(pearson_dispersion)
-    print(model_origin.summary())
     save_glm_tables(
         model_origin,
         pearson_dispersion,
@@ -338,9 +334,7 @@ def plasmid_carriage_counting(df_in):
         },
     )
 
-    # ---------------------------------------------------------
-    # 7. Model: plasmid count ~ ST
-    # ---------------------------------------------------------
+    # Model 2: plasmid count ~ ST
     model_ST = smf.glm(
         "plasmid_count ~ C(ST_collapsed)",
         data=analysis_df,
@@ -348,8 +342,6 @@ def plasmid_carriage_counting(df_in):
     ).fit()
 
     pearson_dispersion = sum(model_ST.resid_pearson**2) / model_ST.df_resid
-    print(pearson_dispersion)
-    print(model_ST.summary())
     save_glm_tables(
         model_ST,
         pearson_dispersion,
@@ -359,9 +351,7 @@ def plasmid_carriage_counting(df_in):
         },
     )
 
-    # ---------------------------------------------------------
-    # 8. Model: plasmid count ~ ST + origin
-    # ---------------------------------------------------------
+    # Model 3: plasmid count ~ ST + origin
     model_both = smf.glm(
         "plasmid_count ~ C(ST_collapsed) + C(origin)",
         data=analysis_df,
@@ -369,8 +359,6 @@ def plasmid_carriage_counting(df_in):
     ).fit()
 
     pearson_dispersion = sum(model_both.resid_pearson**2) / model_both.df_resid
-    print(pearson_dispersion)
-    print(model_both.summary())
     save_glm_tables(
         model_both,
         pearson_dispersion,
@@ -380,6 +368,8 @@ def plasmid_carriage_counting(df_in):
             "ST_collapsed": "1",
         },
     )
+
+    # Plot the model outputs
     plot.glm_forest(
         models=[
             model_origin,
@@ -403,31 +393,61 @@ def plasmid_carriage_counting(df_in):
     )
 
 
-def count_column_composition(df_in: pd.DataFrame, col: str, split: bool = False):
+def count_column_composition(
+    df_in: pd.DataFrame, col: str, split: bool = False
+) -> pd.DataFrame:
+    """
+    Count the values and percentage of categorical values in a dataframe
+    column. Converts to strings to create directly copyable csv.
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        DataFrame containing values
+    col : str
+        Column to count
+    split : bool, optional
+        Should the column values be split on ',', by default False
+
+    Returns
+    -------
+    pd.DataFrame
+        Table with counts and percentages
+    """
     df = df_in.copy()
 
+    # If no split needed
     if not split:
+        # Count
         counts = df[col].value_counts()
+
+        # Calculate fractions
         percentages = (
             df[col].value_counts(normalize=True).mul(100).round(1).astype(str) + "%"
         )
     else:
+        # Split
         s = df[col].dropna().astype(str).str.split(",").explode().str.strip()
+
+        # Count
         counts = s.value_counts()
+
+        # Calculate fractions
         percentages = s.value_counts(normalize=True).mul(100).round(1).astype(str) + "%"
 
+    # Put counts and % together
     col_values = pd.concat([counts, percentages], axis=1)
     col_values.columns = ["count", "percentage"]
     return col_values
 
 
 def test_gene_origin_association(
-    gene,
-    plasmid_gene_binary,
-    origin_col="origin",
-    min_positive=5,
-    n_permutations=2000,
-    random_state=0,
+    gene: str,
+    plasmid_gene_binary: pd.DataFrame,
+    origin_col: str = "origin",
+    min_positive: int = 5,
+    n_permutations: int = 2000,
+    random_state: int = 0,
 ):
     """
     Test whether a gene's presence/absence is associated with plasmid
@@ -440,16 +460,13 @@ def test_gene_origin_association(
       Cramer's V as effect size (correct generalization for r x c tables,
       not just 2x2).
     - A Monte-Carlo permutation p-value (`p_chi2_perm`) for the same
-      chi-square statistic. This is the practical stand-in for the
-      Fisher-Freeman-Halton exact test (the proper r x c generalization
-      of Fisher's exact test), which isn't available in scipy/statsmodels
-      without an R dependency. Use this instead of `p_chi2` whenever
+      chi-square statistic. Use this instead of `p_chi2` whenever
       `low_expected_counts` is True, since the asymptotic chi-square
       p-value is unreliable when >20% of expected cell counts are < 5
       (common here, since many genes will be rare in 1-2 compartments).
     - Post-hoc pairwise tests: for each compartment vs. the other three
       pooled, a 2x2 Fisher exact test (odds ratio + p-value), BH-corrected
-      across the 4 compartments. Use this to see *which* compartment(s)
+      across the 4 compartments. Use this to see which compartment(s)
       drive a significant omnibus result.
 
     Parameters
@@ -471,15 +488,18 @@ def test_gene_origin_association(
     Returns
     -------
     dict
+        statistics output for the input gene
     """
+    # Set RNG
     rng = np.random.default_rng(random_state)
 
+    # Get metadata as series (gene + origin)
     gene_status = plasmid_gene_binary[gene]
     origin = plasmid_gene_binary[origin_col]
 
+    # Check if gene presence meets threshold
     n_pos = int((gene_status == 1).sum())
     n_neg = int((gene_status == 0).sum())
-
     if n_pos < min_positive:
         return {
             "gene": gene,
@@ -488,9 +508,11 @@ def test_gene_origin_association(
             "reason": "Too few gene-positive plasmids",
         }
 
+    # Create contingency table for chi2
     contingency = pd.crosstab(gene_status, origin)
     contingency.index = ["gene_negative", "gene_positive"]
 
+    # Perform chi2
     chi2, p_chi2, dof, expected = chi2_contingency(contingency)
     low_expected_counts = bool((expected < 5).mean() > 0.2)
 
@@ -504,9 +526,9 @@ def test_gene_origin_association(
         perm_chi2[i], _, _, _ = chi2_contingency(perm_table)
     p_chi2_perm = (np.sum(perm_chi2 >= chi2) + 1) / (n_permutations + 1)
 
+    # Calculate statistcs
     n = contingency.to_numpy().sum()
     cramers_v = np.sqrt(chi2 / (n * (min(contingency.shape) - 1)))
-
     residuals = (contingency - expected) / np.sqrt(expected)
 
     # Post-hoc: each compartment vs. the rest, Fisher exact (2x2), BH-corrected
@@ -523,6 +545,7 @@ def test_gene_origin_association(
             {"compartment": compartment, "odds_ratio": odds_ratio, "p_fisher": p_fisher}
         )
 
+    # Create dataframe
     posthoc_df = pd.DataFrame(posthoc_rows)
     posthoc_df["p_fisher_adj"] = multipletests(posthoc_df["p_fisher"], method="fdr_bh")[
         1
@@ -544,10 +567,14 @@ def test_gene_origin_association(
     }
 
 
-def gene_origin_enrichment(df_in, min_positive=10, n_permutations=2000, random_state=0):
+def gene_origin_enrichment(
+    df_in: pd.DataFrame,
+    min_positive: int = 10,
+    n_permutations: int = 2000,
+    random_state: int = 0,
+) -> pd.DataFrame:
     """
-    Gene presence/absence vs. plasmid origin/compartment (4 categories),
-    tested directly at the plasmid level -- no cluster-level aggregation.
+    Gene presence/absence vs. plasmid origin/compartment (4 categories).
 
     Parameters
     ----------
@@ -569,6 +596,7 @@ def gene_origin_enrichment(df_in, min_positive=10, n_permutations=2000, random_s
     """
     df = df_in.copy()
 
+    # column names to include
     gene_columns = [
         config.AMR_COL,
         config.VIR_COL,
@@ -576,6 +604,7 @@ def gene_origin_enrichment(df_in, min_positive=10, n_permutations=2000, random_s
         config.BIOCIDE_COL,
     ]
 
+    # Convert to long format
     long_genes = (
         df.set_index("Plasmid")[gene_columns]
         .stack()
@@ -589,6 +618,7 @@ def gene_origin_enrichment(df_in, min_positive=10, n_permutations=2000, random_s
     )
     long_genes["gene"] = long_genes["gene"].str.strip()
 
+    # Get all the (unique) gene names
     gene_names = sorted(long_genes["gene"].unique())
     print(f"{len(gene_names)} unique genes")
 
@@ -602,7 +632,7 @@ def gene_origin_enrichment(df_in, min_positive=10, n_permutations=2000, random_s
     metadata = df[["Plasmid", "origin"]].drop_duplicates().set_index("Plasmid")
     plasmid_gene_binary = plasmid_gene_matrix.join(metadata)
 
-    ## Test each gene against origin (4 compartments)
+    ## Test each gene against origin
     results = [
         test_gene_origin_association(
             gene,
@@ -616,6 +646,8 @@ def gene_origin_enrichment(df_in, min_positive=10, n_permutations=2000, random_s
     ]
 
     results_df = pd.DataFrame(results).query("tested == True").sort_values("p_chi2")
+
+    # Add multiple testing correction
     results_df["p_chi2_adj"] = multipletests(results_df["p_chi2"], method="fdr_bh")[1]
     results_df["p_chi2_perm_adj"] = multipletests(
         results_df["p_chi2_perm"], method="fdr_bh"
@@ -648,14 +680,38 @@ def count_column_composition_by_cluster(
     row_col: str = config.CLUSTER_COL,
     split: bool = False,
 ):
+    """
+    Count the values and percentage of categorical values in a dataframe
+    column by another column value, default clusters. Percentages represent
+    presence/absence fractions for each row. Converts to strings to create
+    directly copyable csv.
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        DataFrame with column to count
+    column_col : str
+        Column name to count each occurence of
+    row_col : str, optional
+        Column name to count each occurence by, by default config.CLUSTER_COL
+    split : bool, optional
+        Does the column_col input need to be split on ',', by default False
+
+    Returns
+    -------
+    pd.DataFrame
+        Table with counts and percentages
+    """
     df = df_in.copy()
 
     if not split:
+        # Count
         counts = pd.crosstab(
             df[row_col],
             df[column_col],
         )
 
+        # Calculate percentages
         percentages = counts.div(counts.sum(axis=1), axis=0).mul(100).round(1)
 
     else:
@@ -679,23 +735,37 @@ def count_column_composition_by_cluster(
 
         # Denominator = total number of original rows in each row category
         row_totals = df.groupby(row_col).size()
-
         percentages = counts.div(row_totals, axis=0).mul(100).round(1)
 
     return counts.astype(str) + " (" + percentages.astype(str) + "%)"
 
 
 def build_plasmidome_distance(
-    df, cluster_col: str, isolate_col: str = "Parent", origin_col="origin"
+    df: pd.DataFrame, isolate_col: str = "Parent", origin_col: str = "origin"
 ):
     """
     Build a Jaccard distance matrix between isolates based on which
     plasmid backbone clusters they carry (presence/absence "plasmidome").
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataframe containing plasmids, clusters, and associated isolate
+    isolate_col : str, optional
+        Column name where isolate id is stored, by default "Parent"
+    origin_col : str, optional
+        Column name where the epidiomological origin is stored, by default "origin"
+
+    Returns
+    -------
+    DistanceMatrix, pd.DataFrame
+        The distance matrix and metadata dataframe
     """
-    df_unique = df[[isolate_col, cluster_col]].drop_duplicates()
+    CLUSTER_COL = str(config.CLUSTER_COL)
+    df_unique = df[[isolate_col, CLUSTER_COL]].drop_duplicates()
 
     isolate_cluster_matrix = (
-        pd.crosstab(df_unique[isolate_col], df_unique[cluster_col])
+        pd.crosstab(df_unique[isolate_col], df_unique[CLUSTER_COL])
         .astype(bool)
         .astype(int)
     )

@@ -260,7 +260,6 @@ def qc_set():
                 )
 
         no_plasmids_df = pd.DataFrame(no_plasmids)
-
         no_plasmids_df.to_csv(
             no_plasmids_csv,
             sep=";",
@@ -270,7 +269,6 @@ def qc_set():
         # -----------------------------------------------------
         # No complete pair
         # -----------------------------------------------------
-
         missing.append(
             {
                 "KEY": key,
@@ -289,7 +287,6 @@ def qc_set():
     # ---------------------------------------------------------
     # Write missing-pair CSV
     # ---------------------------------------------------------
-
     missing_df = pd.DataFrame(missing)
 
     missing_df.to_csv(
