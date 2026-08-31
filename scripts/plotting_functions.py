@@ -6,10 +6,10 @@ import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 import matplotlib.gridspec as gridspec
 from matplotlib.axes import Axes
+from matplotlib.lines import Line2D
 import seaborn as sns
 from textwrap import wrap
 import geopandas as gp
-import os
 import config
 import baltic as bt
 
@@ -19,6 +19,7 @@ import baltic as bt
 ORIGIN_COL = config.ORIGIN_COL
 SPECIES_COL = config.SPECIES_COL
 ST_COL = config.ST_COL
+DATE_COL = config.DATE_COL
 
 CLUSTER_COL = config.CLUSTER_COL
 TSNE1D = config.TSNE1D
@@ -27,6 +28,9 @@ TSNE2D = config.TSNE2D
 ORIGIN_PALETTE_FULL = config.ORIGIN_PALETTE_FULL
 ORIGIN_PALETTE = config.ORIGIN_PALETTE
 SPECIES_PALETTE = config.SPECIES_PALETTE
+
+FIGSIZE_LANDSCAPE = (11.69, 8.27)
+FIGSIZE_PORTRAIT = (8.27, 11.69)
 
 
 # ---------------------------------------------------------
@@ -277,21 +281,24 @@ def plot_count_map(
     return ax
 
 
-def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL):
+def isolate_data(
+    df_plasmids_in, df_isolates_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL
+):
     cluster_col = CLUSTER_COL
     species_col = SPECIES_COL
     origin_col = ORIGIN_COL
 
-    df = df_in.copy()
+    df_plasmids = df_plasmids_in.copy()
+    df_isolates = df_isolates_in.copy()
     geo_df = geo_df_in.copy()
-    df[species_col] = df[species_col].replace(
+    df_plasmids[species_col] = df_plasmids[species_col].replace(
         {
             "Staphylococcus aureus": r"$\it{Staphyloccocus}$ $\it{aureus}$",
             "Staphylococcus argenteus": r"$\it{Staphyloccocus}$ $\it{argenteus}$",
             "Staphylococcus schweitzeri": r"$\it{Staphyloccocus}$ $\it{argenteus}$",
         }
     )
-    df[origin_col] = df[origin_col].replace(
+    df_plasmids[origin_col] = df_plasmids[origin_col].replace(
         {
             "CA-MRSA": "Community-associated\nMRSA",
             "HA-MRSA": "Hopsital-associated\nMRSA",
@@ -301,15 +308,46 @@ def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL):
             "Ssc": r"$\it{S. argenteus}$",
         }
     )
-    plasmid_count = df.groupby("Parent").agg(
-        plasmid_count=("Plasmid", "nunique"),
-        total_amr_genes=("amr_count", "sum"),
-        origin=(origin_col, "first"),
-        isolate_species=(species_col, "first"),
-        sampling_date=("MATERIAL_SAMPLINGDATE", "first"),
+
+    df_isolates[species_col] = df_isolates[species_col].replace(
+        {
+            "Staphylococcus aureus": r"$\it{Staphyloccocus}$ $\it{aureus}$",
+            "Staphylococcus argenteus": r"$\it{Staphyloccocus}$ $\it{argenteus}$",
+            "Staphylococcus schweitzeri": r"$\it{Staphyloccocus}$ $\it{argenteus}$",
+        }
     )
+    df_isolates[origin_col] = df_isolates[origin_col].replace(
+        {
+            "CA-MRSA": "Community-associated\nMRSA",
+            "HA-MRSA": "Hopsital-associated\nMRSA",
+            "LA-MRSA": "Livestock-associated\nMRSA",
+            "MSSA": r"Sensitive $\it{S. aureus}$",
+            "Sar": r"$\it{S. argenteus}$",
+            "Ssc": r"$\it{S. argenteus}$",
+        }
+    )
+
+    # Count plasmids per isolate
+    plasmid_counts = (
+        df_plasmids.groupby("Parent").size().reset_index(name="plasmid_count")
+    )
+
+    # Combine plasmid count with isolate metadata
+    plasmid_count = (
+        df_isolates[["KEY", origin_col, DATE_COL]]
+        .merge(
+            plasmid_counts,
+            left_on="KEY",
+            right_on="Parent",
+            how="left",
+        )
+        .fillna(0)
+    )
+    print(plasmid_count)
+    print(plasmid_count.columns)
+
     plasmid_count.origin = pd.Categorical(
-        plasmid_count[cluster_col],
+        plasmid_count[origin_col],
         categories=[
             "Community-associated\nMRSA",
             "Hopsital-associated\nMRSA",
@@ -327,10 +365,10 @@ def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL):
     ax2 = fig.add_subplot(gs[1, 0])
     ax3 = fig.add_subplot(gs[1, 1])
 
-    plasmid_count = plasmid_count.rename(columns={"isolate_species": "Species"})
+    df_isolates = df_isolates.rename(columns={SPECIES_COL: "Species"})
     sns.histplot(
-        plasmid_count,
-        x="sampling_date",
+        df_isolates,
+        x=DATE_COL,
         hue="Species",
         palette=SPECIES_PALETTE,
         ax=ax1,
@@ -354,9 +392,9 @@ def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL):
     )
     sns.violinplot(
         data=plasmid_count,
-        x=cluster_col,
+        x=origin_col,
         y="plasmid_count",
-        hue=cluster_col,
+        hue=origin_col,
         palette=ORIGIN_PALETTE_FULL,
         # split=True,
         bw_method=1,
@@ -367,6 +405,7 @@ def isolate_data(df_in, geo_df_in, map_boxes, origin_col: str = ORIGIN_COL):
     )
     ax3.grid()
     ax3.set_ylabel(r"Plasmids ($\it{N}$)")
+    ax3.tick_params(axis="x", labelsize=8)
     ax3.set_xlabel("Epidiomological origin")
     ax3.set_title("C", loc="left")
 
@@ -639,6 +678,17 @@ def glm_forest(
         ]
     )
 
+    # Move only the bottom-left panel to the left
+    pos = ax_ST.get_position()
+    ax_ST.set_position(
+        [
+            pos.x0 - 0.1,  # move left
+            pos.y0,
+            pos.width,
+            pos.height,
+        ]
+    )
+
     # ---------------------------------------------------------
     # Save
     # ---------------------------------------------------------
@@ -650,109 +700,462 @@ def glm_forest(
     return fig, axes
 
 
-def gene_heatmap(result: pd.DataFrame, cluster_col: str):
-    # Columns containing countries
-    country_cols = [
-        col for col in result.columns if col not in ["variable", cluster_col]
-    ]
+def gene_heatmap(result: pd.DataFrame, x_col: str):
+    # Set variables for origin vs cluster plot
+    if x_col == ORIGIN_COL:
+        rstring = r"^([\d.]+)"
+        annotate = True
+        colorbar_label = "Count"
+        xlabel = "Origin"
+        outpath = "results/figures/figureS1_gene_count_origin.png"
 
-    # Extract percentage from "N (%)"
+    elif x_col == CLUSTER_COL:
+        rstring = r"\(([\d.]+)%\)"
+        annotate = False
+        colorbar_label = "Percentage"
+        xlabel = "Cluster"
+        outpath = "results/figures/figure_Sunknown_gene_counts_cluster.png"
+
+    else:
+        raise ValueError(f"Unsupported x_col: {x_col}")
+
+    # Columns containing genes
+    gene_cols = [col for col in result.columns if col not in ["variable", x_col]]
+
     heatmap_data = result.copy()
 
-    for col in country_cols:
-        heatmap_data[col] = (
-            heatmap_data[col].str.extract(r"\(([\d.]+)%\)", expand=False).astype(float)
-        )
+    # ---------------------------------------------------------
+    # Convert values to counts or percentages
+    # ---------------------------------------------------------
+    for col in gene_cols:
+        if heatmap_data[col].dtype == "object":
+            extracted = heatmap_data[col].astype(str).str.extract(rstring, expand=False)
+
+            heatmap_data[col] = pd.to_numeric(
+                extracted,
+                errors="coerce",
+            )
+        else:
+            heatmap_data[col] = pd.to_numeric(
+                heatmap_data[col],
+                errors="coerce",
+            )
 
     variables = heatmap_data["variable"].unique()
 
-    # Number of columns of panels
-    ncols = 4
+    # ---------------------------------------------------------
+    # Find genes actually containing data for each variable
+    # ---------------------------------------------------------
+    variable_gene_data = {}
 
-    # Split variables into rows of panels
-    variable_rows = [variables[i : i + ncols] for i in range(0, len(variables), ncols)]
+    for variable in variables:
+        data = heatmap_data[heatmap_data["variable"] == variable]
 
-    # Height of each panel row = maximum number of clusters
-    # among the variables in that row
-    row_heights = []
+        genes = [gene for gene in gene_cols if data[gene].notna().any()]
 
-    for variable_row in variable_rows:
-        max_rows = max(
-            len(
-                heatmap_data[heatmap_data["variable"] == variable][cluster_col].unique()
-            )
-            for variable in variable_row
-        )
+        variable_gene_data[variable] = genes
 
-        row_heights.append(max_rows)
-
-    # Number of rows in each variable
-    n_rows = [
-        heatmap_data[heatmap_data["variable"] == variable]["cluster"].nunique()
-        for variable in variables
+    # Height proportional to number of genes
+    panel_heights = [
+        max(len(variable_gene_data[variable]), 1) for variable in variables
     ]
 
-    fig = plt.figure(figsize=(15, sum(n_rows) * 0.35))
+    # ---------------------------------------------------------
+    # Figure + GridSpec
+    #
+    # Column 0: colourbar
+    # Column 1: heatmaps
+    # ---------------------------------------------------------
+    fig = plt.figure(figsize=FIGSIZE_PORTRAIT)
 
     gs = gridspec.GridSpec(
         nrows=len(variables),
-        ncols=3,
+        ncols=2,
         figure=fig,
-        height_ratios=n_rows,
-        hspace=0.6,
+        width_ratios=[0.02, 1],
+        height_ratios=panel_heights,
         wspace=0.3,
+        hspace=0.12,
     )
 
-    # Plot panels
-    for row_idx, variable_row in enumerate(variable_rows):
+    # Dedicated axis for the single shared colourbar
+    cbar_ax = fig.add_subplot(gs[:, 0])
 
-        for col_idx, variable in enumerate(variable_row):
+    # ---------------------------------------------------------
+    # Shared colour scale
+    # ---------------------------------------------------------
+    cmap = plt.get_cmap("flare")
 
-            ax = fig.add_subplot(gs[row_idx, col_idx])
+    if x_col == ORIGIN_COL:
+        vmax = heatmap_data[gene_cols].max().max()
+    elif x_col == CLUSTER_COL:
+        vmax = 100
 
-            data = heatmap_data[heatmap_data["variable"] == variable].set_index(
-                cluster_col
-            )[country_cols]
+    norm = plt.Normalize(vmin=0, vmax=vmax)
 
-            sns.heatmap(
-                data,
-                annot=True,
-                fmt=".1f",
-                cmap="Blues",
-                vmin=0,
-                vmax=100,
-                cbar=False,
-                ax=ax,
+    # Keep reference to the last heatmap
+    last_ax = None
+
+    # ---------------------------------------------------------
+    # Plot each variable as a vertically stacked heatmap
+    # ---------------------------------------------------------
+    for row_idx, variable in enumerate(variables):
+
+        ax = fig.add_subplot(gs[row_idx, 1])
+        last_ax = ax
+
+        data = heatmap_data[heatmap_data["variable"] == variable].copy()
+
+        genes = variable_gene_data[variable]
+
+        # Keep only relevant genes and cluster
+        data = data[[x_col] + genes]
+
+        # Cluster -> x-axis
+        # Gene -> y-axis
+        data = data.set_index(x_col).T
+
+        # -----------------------------------------------------
+        # Make zero annotations blank
+        # -----------------------------------------------------
+        annot_data = (
+            data.map(lambda x: "" if pd.isna(x) or x == 0 else f"{int(x)}")
+            if annotate
+            else None
+        )
+
+        # Don't display zeros as coloured cells
+        data = data.replace({0: np.nan})
+
+        sns.heatmap(
+            data,
+            annot=annot_data,
+            annot_kws={"fontsize": 5},
+            fmt="",
+            cmap=cmap,
+            vmin=0,
+            vmax=vmax,
+            cbar=False,
+            linewidths=0.5,
+            linecolor="white",
+            ax=ax,
+        )
+
+        ax.set_title(
+            variable.upper(),
+            loc="left",
+            fontweight="bold",
+        )
+
+        # -----------------------------------------------------
+        # Explicitly set ALL tick positions/labels
+        # -----------------------------------------------------
+        ax.set_xticks(np.arange(data.shape[1]) + 0.5)
+        ax.set_xticklabels(
+            data.columns,
+            rotation=90,
+            fontsize=6,
+        )
+
+        ax.set_yticks(np.arange(data.shape[0]) + 0.5)
+        ax.set_yticklabels(
+            data.index,
+            rotation=0,
+            fontsize=5,
+        )
+
+        ax.set_ylabel("")
+
+        # -----------------------------------------------------
+        # X-axis
+        # Only show x-ticks on the bottom heatmap
+        # -----------------------------------------------------
+        if row_idx == len(variables) - 1:
+            ax.set_xlabel(xlabel)
+            ax.tick_params(
+                axis="x",
+                bottom=True,
+                labelbottom=True,
+                labelsize=6,
+            )
+        else:
+            ax.set_xlabel("")
+            ax.tick_params(
+                axis="x",
+                bottom=False,
+                labelbottom=False,
             )
 
-            ax.set_title(variable)
-            ax.set_xlabel("Gene")
-            ax.set_ylabel("Cluster")
+    # ---------------------------------------------------------
+    # Single shared colourbar
+    # ---------------------------------------------------------
+    sm = plt.cm.ScalarMappable(
+        norm=norm,
+        cmap=cmap,
+    )
+    sm.set_array([])
 
-    # Remove unused axes in final row
-    for col_idx in range(len(variable_rows[-1]), ncols):
-        ax = fig.add_subplot(gs[-1, col_idx])
-        ax.remove()
+    cbar = fig.colorbar(
+        sm,
+        cax=cbar_ax,
+    )
 
-    plt.tight_layout()
-    plt.savefig(f"results/figures/figureS1_gene_counts.png", dpi=600)
-    plt.clf()
+    cbar.set_label(
+        colorbar_label,
+        fontsize=9,
+    )
+
+    cbar.ax.tick_params(
+        labelsize=6,
+    )
+
+    # Optional: put colourbar ticks on the left side
+    cbar.ax.yaxis.set_ticks_position("left")
+    cbar.ax.yaxis.set_label_position("left")
+
+    # ---------------------------------------------------------
+    # Save
+    # ---------------------------------------------------------
+    fig.savefig(
+        outpath,
+        dpi=600,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
 
 
-def spillover_summary(df_in):
+def spillover_summary(df_in: pd.DataFrame, main_figure: bool):
     df = df_in.copy()
 
-    plt.figure(figsize=(10, 8))
-    # fig, ax = plt.subplots(ncols=2, figsize=(10, 8), sharey=True)
-    sns.scatterplot(
-        data=df,
-        x="total_plasmids_with_gene",
-        y="spillover_fraction",
-        size="n_clusters",
-        # ax=ax[0],
+    variables = [
+        "amr",
+        "virulence",
+        "metal",
+        "biocide",
+    ]
+
+    cluster_order = sorted(df[CLUSTER_COL].dropna().unique())
+
+    variable_gene_data = {}
+    for variable in variables:
+        data = df[df["gene_function"] == variable]
+        variable_gene_data[variable] = data["gene"].drop_duplicates().tolist()
+
+    panel_heights = [
+        max(len(variable_gene_data[variable]), 1) for variable in variables
+    ]
+
+    fig = plt.figure(figsize=FIGSIZE_PORTRAIT)
+
+    gs = gridspec.GridSpec(
+        nrows=len(variables),
+        ncols=2,
+        figure=fig,
+        width_ratios=[0.02, 1],
+        height_ratios=panel_heights,
+        wspace=0.3,
+        hspace=0.12,
     )
-    plt.tight_layout()
-    plt.savefig("results/figures/figureS2_gene_spillover.png", dpi=300)
+
+    # -----------------------------------------------------------
+    # Split the colourbar column into a colourbar (top) and a
+    # legend (bottom), so the colourbar doesn't span the full
+    # figure height.
+    # -----------------------------------------------------------
+    cbar_col_gs = gridspec.GridSpecFromSubplotSpec(
+        2,
+        1,
+        subplot_spec=gs[:, 0],
+        height_ratios=[3, 1],
+        hspace=0.15,
+    )
+    cbar_ax = fig.add_subplot(cbar_col_gs[0])
+    legend_ax = fig.add_subplot(cbar_col_gs[1])
+    legend_ax.axis("off")
+
+    cmap = plt.get_cmap("flare")
+    norm = plt.Normalize(vmin=0, vmax=100)
+
+    # -----------------------------------------------------------
+    # Marker style definitions (single source of truth, also
+    # used to build the legend)
+    # -----------------------------------------------------------
+    MARKER_STYLES = {
+        "category_restricted": dict(
+            marker="s", c="#B0AEAE", edgecolors="black", label="Category\nrestricted"
+        ),
+        "novel_cluster_introduction": dict(
+            marker="o", c="#FF3131", edgecolors="k", label="Novel cluster\nintroduction"
+        ),
+        "novel_gene_introduction": dict(
+            marker="^", c="#5BFF3A", edgecolors="k", label="Novel gene\nintroduction"
+        ),
+    }
+
+    for row_idx, variable in enumerate(variables):
+
+        ax = fig.add_subplot(gs[row_idx, 1])
+
+        data = df[df["gene_function"] == variable].copy()
+
+        heatmap_data = data.pivot(
+            index="gene",
+            columns=CLUSTER_COL,
+            values="percent_present",
+        )
+
+        heatmap_data = heatmap_data.reindex(columns=cluster_order)
+
+        if not heatmap_data.empty:
+            gene_order = heatmap_data.mean(axis=1).sort_values(ascending=False).index
+            heatmap_data = heatmap_data.loc[gene_order]
+
+        heatmap_plot = heatmap_data.replace({0: np.nan})
+
+        sns.heatmap(
+            heatmap_plot,
+            cmap=cmap,
+            vmin=0,
+            vmax=100,
+            cbar=False,
+            linewidths=0.5,
+            linecolor="white",
+            ax=ax,
+        )
+
+        ax.set_title(variable.upper(), loc="left", fontweight="bold")
+
+        ax.set_xticks(np.arange(len(cluster_order)) + 0.5)
+        ax.set_xticklabels(cluster_order, rotation=90, fontsize=6)
+
+        ax.set_yticks(np.arange(heatmap_data.shape[0]) + 0.5)
+        ax.set_yticklabels(heatmap_data.index, rotation=0, fontsize=5)
+        ax.set_ylabel("")
+
+        if row_idx == len(variables) - 1:
+            ax.set_xlabel("Plasmid Cluster")
+            ax.tick_params(axis="x", bottom=True, labelbottom=True, labelsize=6)
+        else:
+            ax.set_xlabel("")
+            ax.tick_params(axis="x", bottom=False, labelbottom=False)
+
+        # =====================================================
+        # Overlay spillover sub-type / category restriction
+        # =====================================================
+
+        marker_data = (
+            data[
+                [
+                    "gene",
+                    CLUSTER_COL,
+                    "spillover",
+                    "category_restricted",
+                    "novel_cluster_introduction",
+                    "novel_gene_introduction",
+                ]
+            ]
+            .drop_duplicates(subset=["gene", CLUSTER_COL])
+            .set_index(["gene", CLUSTER_COL])
+        )
+
+        for i, gene in enumerate(heatmap_data.index):
+
+            for j, cluster in enumerate(cluster_order):
+
+                key = (gene, cluster)
+
+                if key not in marker_data.index:
+                    continue
+
+                cell = marker_data.loc[key]
+
+                # ---------------------------------------------
+                # Priority: category restriction > novel cluster
+                # introduction > novel gene introduction.
+                # Plain, established spillover (no novel signal
+                # in any category) gets no marker — the heatmap
+                # colour alone is enough for that case.
+                # ---------------------------------------------
+                if cell["category_restricted"]:
+                    style_key = "category_restricted"
+                elif cell["spillover"] and cell["novel_cluster_introduction"]:
+                    style_key = "novel_cluster_introduction"
+                elif cell["spillover"] and cell["novel_gene_introduction"]:
+                    style_key = "novel_gene_introduction"
+                else:
+                    continue
+
+                style = MARKER_STYLES[style_key]
+
+                ax.scatter(
+                    j + 0.5,
+                    i + 0.5,
+                    s=15,
+                    c=style["c"],
+                    marker=style["marker"],
+                    edgecolors=style["edgecolors"],
+                    linewidth=0.4,
+                    zorder=10,
+                    alpha=0.9,
+                )
+
+    # =========================================================
+    # Shared colourbar (top portion of column 0)
+    # =========================================================
+
+    sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])
+
+    cbar = fig.colorbar(sm, cax=cbar_ax)
+    cbar.set_label("Percentage of plasmids", fontsize=9)
+    cbar.ax.tick_params(labelsize=6)
+    cbar.ax.yaxis.set_ticks_position("left")
+    cbar.ax.yaxis.set_label_position("left")
+
+    # =========================================================
+    # Legend (bottom portion of column 0)
+    # =========================================================
+
+    legend_handles = [
+        Line2D(
+            [0],
+            [0],
+            marker=style["marker"],
+            color="none",
+            markerfacecolor=style["c"],
+            markeredgecolor=style["edgecolors"],
+            markeredgewidth=0.5,
+            markersize=6,
+            label=style["label"],
+        )
+        for style in MARKER_STYLES.values()
+    ]
+
+    legend_ax.legend(
+        handles=legend_handles,
+        loc="center",
+        frameon=False,
+        fontsize=6,
+        handletextpad=0.5,
+        labelspacing=1.0,
+    )
+
+    # =========================================================
+    # Save
+    # =========================================================
+    if main_figure:
+        outpath = "results/figures/figure5_gene_spillover_ST.png"
+    else:
+        outpath = "results/figures/figureS2_gene_spillover_origin.png"
+
+    fig.savefig(
+        outpath,
+        dpi=600,
+        bbox_inches="tight",
+    )
+
+    plt.close(fig)
 
 
 def add_ellipse(df, ax, column_name):
@@ -867,7 +1270,7 @@ def tsne_by_cluster(
     ax2.set_ylabel("t-SNE 2D")
     ax2.set_xlabel("t-SNE 1D")
     ax2.set_title("B", loc="left")
-    ax2.legend(loc="lower left")
+    ax2.legend(loc="upper left")
 
     df.AMR_plasmid = df.AMR_plasmid.replace(
         {
@@ -889,7 +1292,7 @@ def tsne_by_cluster(
     ax3.set_ylabel("t-SNE 2D")
     ax3.set_xlabel("t-SNE 1D")
     ax3.set_title("C", loc="left")
-    ax3.legend(loc="lower left")
+    ax3.legend(loc="upper left")
 
     plt.tight_layout()
     plt.savefig(f"results/figures/figure3_tnse.png", dpi=300)
@@ -928,7 +1331,7 @@ def composition_by_cluster(
     # ---------------------------------------------------------
     # Plot 2: Origin
     # ---------------------------------------------------------
-    df[cluster_col] = df[cluster_col].replace(
+    df[origin_col] = df[origin_col].replace(
         {
             "Sar": r"$\it{S. argenteus}$",
         }
@@ -944,8 +1347,8 @@ def composition_by_cluster(
 
     origin_palette = ORIGIN_PALETTE
 
-    df[cluster_col] = pd.Categorical(
-        df[cluster_col],
+    df[origin_col] = pd.Categorical(
+        df[origin_col],
         categories=origin_categories,
         ordered=True,
     )
@@ -954,7 +1357,7 @@ def composition_by_cluster(
         df,
         x=cluster_col,
         stat="percent",
-        hue=cluster_col,
+        hue=origin_col,
         palette=origin_palette,
         multiple="fill",
         legend=False,
@@ -979,7 +1382,7 @@ def composition_by_cluster(
 
     isolate_st_counts = isolate_df[st_col].value_counts()
 
-    common_STs = isolate_st_counts[isolate_st_counts >= 10].index
+    common_STs = isolate_st_counts[isolate_st_counts >= 25].index
 
     df[st_col] = df[st_col].where(
         df[st_col].isin(common_STs),
@@ -1017,7 +1420,7 @@ def composition_by_cluster(
     # ---------------------------------------------------------
     # Plot 4: ARG count
     # ---------------------------------------------------------
-    amr_categories = list(range(0, 6))
+    amr_categories = list(range(0, df["amr_count"].max() + 1))
 
     amr_palette = create_palette(
         amr_categories,
@@ -1038,8 +1441,9 @@ def composition_by_cluster(
     )
     axs[3].set_ylabel(r"ARGs ($\it{N}$)")
     axs[3].set_title("D", loc="left", pad=15, x=-0.05)
-
     axs[3].tick_params(axis="x", rotation=90, labelsize=8)
+
+    axs[3].set(xlabel="Cluster")
 
     # ---------------------------------------------------------
     # Manual legends
@@ -1050,8 +1454,8 @@ def composition_by_cluster(
         axs[1],
         origin_palette,
         origin_categories,
-        title=cluster_col,
-        ncol=4,
+        title="Epidemiological Compartment",
+        ncol=5,
     )
 
     # Isolate ST: compact multi-row legend
@@ -1060,7 +1464,7 @@ def composition_by_cluster(
         st_palette,
         st_categories,
         title="Isolate ST",
-        ncol=16,
+        ncol=14,
     )
 
     # ARG count: one row
@@ -1069,7 +1473,7 @@ def composition_by_cluster(
         amr_palette,
         amr_categories,
         title="ARG count",
-        ncol=6,
+        ncol=12,
     )
 
     # ---------------------------------------------------------
@@ -1091,7 +1495,7 @@ def composition_by_cluster(
         right=0.98,
         top=0.98,
         bottom=0.05,
-        hspace=0.30,
+        hspace=0.32,
     )
 
     # ---------------------------------------------------------

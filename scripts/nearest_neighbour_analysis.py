@@ -3,9 +3,10 @@ import numpy as np
 import subprocess
 import shutil
 import os
+import networkx as nx
 from pathlib import Path
 from functools import partial
-from multiprocessing import Pool, set_start_method
+from multiprocessing import Pool
 from helper_functions import lsf_hpcify_cmd
 import config
 from plotting_functions import plot_single_tangle
@@ -24,37 +25,43 @@ CLUSTER_COL = config.CLUSTER_COL
 # ---------------------------------------------------------
 # 5.1.1 Run mashtree for a single cluster
 # ---------------------------------------------------------
-def run_mashtree(cluster, df_in, cluster_col):
+def run_mashtree(cluster, df_in):
     df = df_in.copy()
-    fastas = df["Plasmid"].loc[df[cluster_col] == cluster].to_list()
+    fastas = df["Plasmid"].loc[df[CLUSTER_COL] == cluster].to_list()
 
     print(f"Running plasmid mashtree for cluster {cluster}")
-    path_pls = f"mashtree/{cluster}/pls"
+    path_pls = f"output/mashtree/{cluster}/pls"
     os.makedirs(path_pls, exist_ok=True)
-    [shutil.copy2(f"fastas/{x}.fasta", f"{path_pls}") for x in fastas]
-    mash_tree_cmd = f"conda run -n mash_master mashtree --mindepth 0 --numcpus 12 {path_pls}/*.fasta > mashtree/{cluster}_tree.dnd"
-    mash_tree_cmd = lsf_hpcify_cmd(
-        mash_tree_cmd, f"logs/mashtree/logs/{cluster}_mash.log", 12, 200, 3600
-    )
-    subprocess.call(
-        f"{mash_tree_cmd}",
-        shell=True,
-    )
+    if not os.path.isfile(f"output/mashtree/{cluster}_tree.dnd"):
+        [shutil.copy2(f"fastas/{x}.fasta", f"{path_pls}") for x in fastas]
+        mash_tree_cmd = f"'conda run -n mash_master mashtree --mindepth 0 --numcpus 12 {path_pls}/*.fasta > output/mashtree/{cluster}_tree.dnd'"
+        mash_tree_cmd = lsf_hpcify_cmd(
+            mash_tree_cmd, f"logs/mashtree/logs/{cluster}_mash.log", 12, 200, 3600
+        )
+        subprocess.call(
+            f"{mash_tree_cmd}",
+            shell=True,
+        )
 
     print(f"Running chromosome mashtree for cluster {cluster}")
     fastas_chr = [f"{x.split('_')[0]}" for x in fastas]
     fastas_chr = list(set(fastas_chr))
-    path_chr = f"mashtree/{cluster}/chr"
+    path_chr = f"output/mashtree/{cluster}/chr"
     os.makedirs(path_chr, exist_ok=True)
-    [shutil.copy2(f"fastas_chr/{x}.fasta", f"{path_chr}") for x in fastas_chr]
-    mash_tree_cmd_chr = f"conda run -n mash_master mashtree --mindepth 0 --numcpus 12 {path_chr}/*.fasta > mashtree/{cluster}_chr_tree.dnd"
-    mash_tree_cmd_chr = lsf_hpcify_cmd(
-        mash_tree_cmd_chr, f"logs/mashtree/logs/{cluster}_chr_mash.log", 12, 200, 3600
-    )
-    subprocess.call(
-        f"{mash_tree_cmd_chr}",
-        shell=True,
-    )
+    if not os.path.isfile(f"output/mashtree/{cluster}_chr_tree.dnd"):
+        [shutil.copy2(f"fastas_chr/{x}.fasta", f"{path_chr}") for x in fastas_chr]
+        mash_tree_cmd_chr = f"'conda run -n mash_master mashtree --mindepth 0 --numcpus 12 {path_chr}/*.fasta > output/mashtree/{cluster}_chr_tree.dnd'"
+        mash_tree_cmd_chr = lsf_hpcify_cmd(
+            mash_tree_cmd_chr,
+            f"logs/mashtree/logs/{cluster}_chr_mash.log",
+            12,
+            200,
+            3600,
+        )
+        subprocess.call(
+            f"{mash_tree_cmd_chr}",
+            shell=True,
+        )
 
 
 # ---------------------------------------------------------
@@ -62,13 +69,96 @@ def run_mashtree(cluster, df_in, cluster_col):
 # ---------------------------------------------------------
 def mashtree_builder(df_in: pd.DataFrame, n_jobs: int, cluster_col: str):
     df = df_in.copy()
-    set_start_method("spawn")
     os.makedirs("logs", exist_ok=True)
 
     clusters = df[cluster_col].unique()
 
     with Pool(processes=n_jobs, maxtasksperchild=1) as pool:
-        pool.map(partial(run_mashtree, df_in=df, plasmids=False), clusters)
+        pool.map(partial(run_mashtree, df_in=df), clusters)
+
+
+# ---------------------------------------------------------
+# 5.1.3 convert wgMLST assignments to distance matrices
+# ---------------------------------------------------------
+def wgMLST_converter():
+    os.makedirs("output/wgmlst/", exist_ok=True)
+
+    cmd_sau = "cgmlst-dists -j 10 -x 3000 data/wgMLST_sau.txt > output/wgmlst/wgMLST_sau_dist.tab"
+    subprocess.call(
+        cmd_sau,
+        shell=True,
+    )
+
+    cmd_sar = "cgmlst-dists -j 10 -x 3000 data/wgMLST_sar.txt > output/wgmlst/wgMLST_sar_dist.tab"
+    subprocess.call(
+        cmd_sar,
+        shell=True,
+    )
+
+
+# ---------------------------------------------------------
+# 5.1.4 Create wgMLST matrices by cluster
+# ---------------------------------------------------------
+def wgMLST_prepper(df_in: pd.DataFrame):
+    df = df_in.copy()
+
+    # Input files
+    sau_file = "output/wgmlst/wgMLST_sau_dist.tab"
+    sar_file = "output/wgmlst/wgMLST_sar_dist.tab"
+
+    # 1. Get all unique cluster values
+    cluster_ids = df[CLUSTER_COL].dropna().unique()
+
+    # 2. Read the two distance matrices
+    sau = pd.read_csv(sau_file, sep="\t", index_col=0)
+    sar = pd.read_csv(sar_file, sep="\t", index_col=0)
+
+    # Make sure isolate IDs are strings
+    df["Parent"] = df["Parent"].astype(str)
+    sau.index = sau.index.astype(str)
+    sau.columns = sau.columns.astype(str)
+
+    sar.index = sar.index.astype(str)
+    sar.columns = sar.columns.astype(str)
+
+    # 3-6. Process each cluster
+    for cluster_id in cluster_ids:
+        # Get isolate IDs belonging to this cluster
+        isolate_ids = (
+            df.loc[df[CLUSTER_COL] == cluster_id, "Parent"].dropna().unique().tolist()
+        )
+
+        # 4. Select only isolates from this cluster
+        sau_isolates = [x for x in isolate_ids if x in sau.index]
+        sar_isolates = [x for x in isolate_ids if x in sar.index]
+
+        sau_cluster = sau.loc[sau_isolates, sau_isolates]
+        sar_cluster = sar.loc[sar_isolates, sar_isolates]
+
+        # 5. Combine the two matrices
+        # The union contains all isolates in the cluster from either species.
+        all_isolates = sau_isolates + [x for x in sar_isolates if x not in sau_isolates]
+
+        combined = pd.DataFrame(index=all_isolates, columns=all_isolates, dtype=float)
+
+        # Put S. aureus distances into the combined matrix
+        if not sau_cluster.empty:
+            combined.loc[sau_isolates, sau_isolates] = sau_cluster
+
+        # Put S. argenteus distances into the combined matrix
+        if not sar_cluster.empty:
+            combined.loc[sar_isolates, sar_isolates] = sar_cluster
+
+        # 6. Save the cluster-specific matrix
+        output_file = f"output/wgmlst/{cluster_id}_distances.tab"
+        combined.to_csv(output_file, sep="\t", na_rep="")
+
+        print(
+            f"Cluster {cluster_id}: "
+            f"{len(all_isolates)} isolates "
+            f"({len(sau_isolates)} S. aureus, "
+            f"{len(sar_isolates)} S. argenteus) -> {output_file}"
+        )
 
 
 # ---------------------------------------------------------
@@ -109,7 +199,7 @@ def _load_wgmlst(cluster: str, group: pd.DataFrame) -> pd.DataFrame:
         .reset_index(drop=True)
     )
 
-    path = Path(f"output/wgmlst_2/{cluster}_distances.tab")
+    path = Path(f"output/wgmlst/{cluster}_distances.tab")
     if not path.exists():
         mash_df["host_wgmlst_dist"] = np.nan
         return mash_df

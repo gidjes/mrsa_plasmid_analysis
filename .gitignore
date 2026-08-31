@@ -8,6 +8,6 @@ fastas/
 fastas_chr/
 data/
 mrsa_plasmid_analysis.egg-info/
-mge_bootstrap/
-mashtree/
 results/
+output/
+logs/

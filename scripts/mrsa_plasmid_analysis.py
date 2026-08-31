@@ -30,55 +30,57 @@ def mrsa_plasmid_analysis():
     fastas = os.listdir("fastas")
     iso_fastas = os.listdir("fastas_chr")
 
-    # Remove extension
-    files = [int(x).split(".fasta")[0] for x in fastas]
-    iso_files = [int(x).split(".fasta")[0] for x in iso_fastas]
+    # # Remove extension
+    # files = [x.split(".fasta")[0] for x in fastas]
+    # iso_files = [int(x.split(".fasta")[0]) for x in iso_fastas]
 
-    # Find missing items between the lists
-    missing_fastas = [x for x in fastas if x not in metadata_df["Plasmid"].values]
-    missing_fastas += [x for x in iso_fastas if x not in metadata_df["Parent"].values]
+    # # Find missing items between the lists
+    # missing_fastas = [x for x in fastas if x not in metadata_df["Plasmid"].values]
+    # missing_fastas += [x for x in iso_fastas if x not in metadata_df["Parent"].unique()]
 
-    missing_metadata = [x for x in metadata_df["Plasmid"].values if x not in files]
-    missing_metadata += [x for x in metadata_df["Parent"].values if x not in iso_files]
+    # missing_metadata = [x for x in metadata_df["Plasmid"].values if x not in files]
+    # missing_metadata += [
+    #     x for x in metadata_df["Parent"].unique() if x not in iso_files
+    # ]
 
-    # Report completeness
-    if len(missing_fastas) > 0:
-        print("All fasta files have corresponding metadata")
-        print("\n")
-    else:
-        print(f"Missing metadata for {len(missing_fastas)} files:")
-        print(missing_fastas)
-        print("\n")
+    # # Report completeness
+    # if len(missing_fastas) > 0:
+    #     print("All fasta files have corresponding metadata")
+    #     print("\n")
+    # else:
+    #     print(f"Missing metadata for {len(missing_fastas)} files:")
+    #     print(missing_fastas)
+    #     print("\n")
 
-    if len(missing_metadata) > 0:
-        print("All metadata have corresponding fasta files")
-        print("\n")
-    else:
-        print(f"Missing fastas for {len(missing_metadata)} plasmids:")
-        print(missing_metadata)
-        print("\n")
+    # if len(missing_metadata) > 0:
+    #     print("All metadata have corresponding fasta files")
+    #     print("\n")
+    # else:
+    #     print(f"Missing fastas for {len(missing_metadata)} plasmids:")
+    #     print(missing_metadata)
+    #     print("\n")
 
     # Make necessary output directories
     os.makedirs("results/figures", exist_ok=True)
     os.makedirs("results/tables", exist_ok=True)
 
-    # ---------------------------------------------------------
-    # 2. mge-bootstrap -> create scheme
-    # ---------------------------------------------------------
-    # Make required directories
-    os.makedirs("logs/mge/", exist_ok=True)
-    os.makedirs("mge_bootstrap/", exist_ok=True)
+    # # ---------------------------------------------------------
+    # # 2. mge-bootstrap -> create scheme
+    # # ---------------------------------------------------------
+    # # Make required directories
+    # os.makedirs("logs/mge/", exist_ok=True)
+    # os.makedirs("mge_bootstrap/", exist_ok=True)
 
-    # Run the bootstrap optimiser
-    mge_bootstrap.create_input_file()
-    mge_bootstrap.bootstrap_mge_cluster()
+    # # Run the bootstrap optimiser
+    # mge_bootstrap.create_input_file()
+    # mge_bootstrap.bootstrap_mge_cluster()
 
-    # Get optimised paramter values
-    perplexity = mge_bootstrap.bootstrap_rand("perplexity")
-    clustersize = mge_bootstrap.bootstrap_rand("clustersize")
+    # # Get optimised paramter values
+    # perplexity = mge_bootstrap.bootstrap_rand("perplexity")
+    # clustersize = mge_bootstrap.bootstrap_rand("clustersize")
 
-    # Perform optimised mge-cluster
-    mge_bootstrap.optimised_mge(perplexity, clustersize)
+    # # Perform optimised mge-cluster
+    # mge_bootstrap.optimised_mge(perplexity, clustersize)
 
     # ---------------------------------------------------------
     # 3. Population description
@@ -86,28 +88,36 @@ def mrsa_plasmid_analysis():
     # Load and clean required files
     genome_df = pd.read_csv("data/genome_data.csv", sep=";")
     plasmid_df = genome_df.merge(
-        metadata_df, left_on="Parent", right_on="Isolate_ID", how="left"
+        metadata_df, left_on="Parent", right_on="KEY", how="left"
     )
-    clustering_df = pd.read_csv("mge_bootstrap/final_model/mge-cluster_results.csv")
-    plasmid_df = clean_plasmid_df(metadata_df, clustering_df)
+    clustering_df = pd.read_csv(
+        "output/mge_bootstrap/final_model/mge-cluster_results.csv"
+    )
+    plasmid_df = clean_plasmid_df(plasmid_df, clustering_df, True)
+    metadata_df = clean_plasmid_df(metadata_df, clustering_df, False)
+    plasmid_df.to_csv("data/merged_data.csv", sep=";", index=False)
 
-    # Run population-level analysis
-    population_description.dataset_overview(plasmid_df)
+    # # Run population-level analysis
+    # population_description.dataset_overview(plasmid_df, metadata_df)
 
-    # ---------------------------------------------------------
-    # 4. Scheme / cluster-level description
-    # ---------------------------------------------------------
-    # Run cluster-level analysis
-    population_description.cluster_overview(plasmid_df)
+    # # ---------------------------------------------------------
+    # # 4. Scheme / cluster-level description
+    # # ---------------------------------------------------------
+    # # Run cluster-level analysis
+    # population_description.cluster_overview(plasmid_df, metadata_df)
 
-    # ---------------------------------------------------------
-    # 5. Nearly-identical plasmid analysis
-    # ---------------------------------------------------------
-    # Calculate mash distances and create phylogenetic trees
-    nearest_neighbour_analysis.mashtree_builder(plasmid_df, NJOBS, CLUSTER_COL)
+    # # ---------------------------------------------------------
+    # # 5. Nearly-identical plasmid analysis
+    # # ---------------------------------------------------------
+    # # Calculate mash distances and create phylogenetic trees
+    # nearest_neighbour_analysis.mashtree_builder(plasmid_df, NJOBS, CLUSTER_COL)
 
-    # Run sequence-level analysis
-    bin_dynamics.bin_post_hoc(plasmid_df)
+    # # Create the wgMLST distance files
+    # nearest_neighbour_analysis.wgMLST_converter()
+    nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
+
+    # # Run sequence-level analysis
+    # bin_dynamics.bin_post_hoc(plasmid_df)
 
 
 if __name__ == "__main__":

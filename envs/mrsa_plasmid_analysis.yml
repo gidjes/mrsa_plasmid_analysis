@@ -6,6 +6,7 @@ channels:
 dependencies:
   - mge-cluster
   - mashtree
+  - cgmlst-dists
   - python=3.10
   - pip
   - pip:

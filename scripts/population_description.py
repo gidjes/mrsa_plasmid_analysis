@@ -10,20 +10,24 @@ from statsmodels.stats.multitest import multipletests
 
 from scipy.stats import kruskal, mannwhitneyu, chi2_contingency, fisher_exact, chi2
 from scipy.spatial.distance import pdist, squareform
-
-from skbio import DistanceMatrix
-from skbio.stats.distance import permanova
+from skbio.stats.distance import (
+    DistanceMatrix,
+    permanova,
+    permdisp,
+)
 from skbio.stats.ordination import pcoa
 
 import config
 from helper_functions import clean_plasmid_df
 import plotting_functions as plot
 
+CLUSTER_COL = config.CLUSTER_COL
+
 
 # ---------------------------------------------------------
 # 3.1.0 Helper Functions
 # ---------------------------------------------------------
-def plot_population(df_in: pd.DataFrame):
+def plot_population(df_plasmids_in: pd.DataFrame, df_isolates_in: pd.DataFrame):
     """
     Helper function to plot the output from the population
     statistics. Loads and readies map files/geojson
@@ -34,11 +38,13 @@ def plot_population(df_in: pd.DataFrame):
 
     Parameters
     ----------
-    df_in : pd.DataFrame
+    df_plasmids_in : pd.DataFrame
         Dataframe containing plasmid metadata
+    df_isolates_in : pd.DataFrame
+        Dataframe containing isolate metadata
     """
-    parent_df = df_in[
-        [config.PARENT_COL, "city", "municipality", "province"]
+    parent_df = df_isolates_in[
+        ["KEY", "city", "municipality", "province"]
     ].drop_duplicates()
 
     map_counts = parent_df.value_counts(["municipality", "province"]).reset_index()
@@ -59,7 +65,7 @@ def plot_population(df_in: pd.DataFrame):
     municiple_map = municiple_map.merge(
         map_counts, on=["municipality", "province"], how="left"
     )
-    plot.plot_isolate_data(df_in, municiple_map, map_boxes)
+    plot.isolate_data(df_plasmids_in, df_isolates_in, municiple_map, map_boxes)
 
 
 def save_glm_tables(
@@ -254,7 +260,401 @@ def save_glm_tables(
     return model_info, results
 
 
-def plasmid_carriage_counting(df_in: pd.DataFrame):
+def save_plasmidome_tables(
+    results,
+    output_dir="results/tables",
+    table_permanova="S5",
+    table_dispersion="S6",
+):
+    """
+    Save publication-ready plasmidome PERMANOVA and dispersion
+    results as four supplementary CSV tables.
+
+    Output structure
+    ----------------
+    Table S5: PERMANOVA
+        S5A = Global PERMANOVA
+        S5B = Pairwise PERMANOVA
+
+    Table S6: Dispersion
+        S6A = Global PERMDISP + group-level dispersion
+        S6B = Pairwise dispersion comparisons
+
+    Parameters
+    ----------
+    results : dict
+        Output dictionary returned by
+        `compartment_plasmidome_dispersion()`.
+
+    output_dir : str, default="results/tables"
+        Directory where CSV files will be saved.
+
+    table_permanova : str, default="S5"
+        Supplementary table number assigned to PERMANOVA.
+
+    table_dispersion : str, default="S6"
+        Supplementary table number assigned to dispersion analysis.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the four output DataFrames:
+
+        {
+            "S5A": global_permanova,
+            "S5B": pairwise_permanova,
+            "S6A": global_dispersion,
+            "S6B": pairwise_dispersion,
+        }
+    """
+
+    import os
+    import numpy as np
+    import pandas as pd
+
+    # =========================================================
+    # Create output directory
+    # =========================================================
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # =========================================================
+    # Helper functions
+    # =========================================================
+
+    def format_pvalue(p):
+        """
+        Publication-style p-value formatting.
+        """
+        if pd.isna(p):
+            return ""
+        if p < 0.001:
+            return "<0.001"
+        return f"{p:.3f}"
+
+    def format_numeric(df, columns, decimals=3):
+        """
+        Round selected numeric columns if present.
+        """
+        for column in columns:
+            if column in df.columns:
+                df[column] = pd.to_numeric(df[column], errors="coerce").round(decimals)
+        return df
+
+    # =========================================================
+    # Extract results
+    # =========================================================
+
+    dm = results["distance_matrix"]
+    metadata = results["metadata"]
+    isolate_cluster_matrix = results["isolate_cluster_matrix"]
+
+    global_permanova = results["global_permanova"]
+    global_permanova_r2 = results["global_permanova_R2"]
+
+    pairwise_permanova = results["pairwise_permanova"].copy()
+
+    permdisp = results["permdisp"]
+
+    dispersion_summary = results["dispersion_summary"].copy()
+
+    dispersion_pairwise = results["dispersion_pairwise"].copy()
+
+    # =========================================================
+    # TABLE S5A — GLOBAL PERMANOVA
+    # =========================================================
+
+    n_isolates = len(metadata)
+    n_compartments = metadata["origin"].nunique()
+    n_clusters = isolate_cluster_matrix.shape[1]
+
+    permanova_F = float(global_permanova["test statistic"])
+
+    permanova_p = float(global_permanova["p-value"])
+
+    permanova_permutations = int(global_permanova["number of permutations"])
+
+    table_S5A = pd.DataFrame(
+        {
+            "Statistic": [
+                "No. isolates",
+                "No. compartments",
+                "No. plasmid backbone clusters",
+                "Distance metric",
+                "Data representation",
+                "Pseudo-F",
+                "R2",
+                "P_value",
+                "Permutations",
+            ],
+            "Value": [
+                n_isolates,
+                n_compartments,
+                n_clusters,
+                "Jaccard",
+                "Plasmid backbone-cluster presence/absence",
+                f"{permanova_F:.3f}",
+                f"{global_permanova_r2:.3f}",
+                format_pvalue(permanova_p),
+                permanova_permutations,
+            ],
+        }
+    )
+
+    table_S5A = format_numeric(
+        table_S5A,
+        columns=[
+            "Value",
+        ],
+    )
+
+    # Restore integer/string values that should not be represented
+    # as decimal numbers after generic rounding.
+    table_S5A.loc[
+        table_S5A["Statistic"] == "No. isolates",
+        "Value",
+    ] = n_isolates
+
+    table_S5A.loc[
+        table_S5A["Statistic"] == "No. compartments",
+        "Value",
+    ] = n_compartments
+
+    table_S5A.loc[
+        table_S5A["Statistic"] == "No. plasmid backbone clusters",
+        "Value",
+    ] = n_clusters
+
+    table_S5A.loc[
+        table_S5A["Statistic"] == "Permutations",
+        "Value",
+    ] = permanova_permutations
+
+    table_S5A.to_csv(
+        os.path.join(
+            output_dir,
+            f"table{table_permanova}_PERMANOVA_A.csv",
+        ),
+        sep=";",
+        index=False,
+    )
+
+    # =========================================================
+    # =========================================================
+    # TABLE S5B — PAIRWISE PERMANOVA
+    # =========================================================
+    # =========================================================
+
+    # Support both the new column names and the names from
+    # earlier versions of the function.
+    pairwise_permanova = pairwise_permanova.rename(
+        columns={
+            "group1": "Group_1",
+            "group2": "Group_2",
+            "p": "P_value",
+            "p_adj": "P_value_BH",
+        }
+    )
+
+    table_S5B = pairwise_permanova[
+        [
+            "Group_1",
+            "Group_2",
+            "F",
+            "R2",
+            "P_value",
+            "P_value_BH",
+            "n1",
+            "n2",
+        ]
+    ].copy()
+
+    table_S5B = table_S5B.rename(
+        columns={
+            "F": "Pseudo_F",
+        }
+    )
+
+    table_S5B = format_numeric(
+        table_S5B,
+        columns=[
+            "Pseudo_F",
+            "R2",
+        ],
+    )
+
+    table_S5B["P_value"] = table_S5B["P_value"].astype(float).apply(format_pvalue)
+
+    table_S5B["P_value_BH"] = table_S5B["P_value_BH"].astype(float).apply(format_pvalue)
+
+    table_S5B.to_csv(
+        os.path.join(
+            output_dir,
+            f"table{table_permanova}_PERMANOVA_B.csv",
+        ),
+        sep=";",
+        index=False,
+    )
+
+    # =========================================================
+    # TABLE S6A — GLOBAL PERMDISP + GROUP DISPERSION
+    # =========================================================
+    permdisp_F = float(permdisp["test statistic"])
+
+    permdisp_p = float(permdisp["p-value"])
+
+    permdisp_permutations = int(permdisp["number of permutations"])
+
+    # ---------------------------------------------------------
+    # Global PERMDISP
+    # ---------------------------------------------------------
+
+    global_dispersion = pd.DataFrame(
+        {
+            "Statistic": [
+                "Test",
+                "Center",
+                "No. isolates",
+                "No. compartments",
+                "F",
+                "P_value",
+                "Permutations",
+            ],
+            "Value": [
+                "PERMDISP",
+                "Centroid",
+                str(n_isolates),
+                str(n_compartments),
+                f"{permdisp_F:.3f}",
+                format_pvalue(permdisp_p),
+                str(permdisp_permutations),
+            ],
+        }
+    )
+
+    # ---------------------------------------------------------
+    # Group-level dispersion
+    # ---------------------------------------------------------
+
+    group_dispersion = dispersion_summary.reset_index().rename(
+        columns={
+            "origin": "Origin",
+            "median": "Median_distance_to_centroid",
+            "Q1": "Q1_distance_to_centroid",
+            "Q3": "Q3_distance_to_centroid",
+            "mean": "Mean_distance_to_centroid",
+            "SD": "SD_distance_to_centroid",
+            "n": "n",
+        }
+    )
+
+    for column in [
+        "Median_distance_to_centroid",
+        "Q1_distance_to_centroid",
+        "Q3_distance_to_centroid",
+        "Mean_distance_to_centroid",
+        "SD_distance_to_centroid",
+    ]:
+        if column in group_dispersion.columns:
+            group_dispersion[column] = group_dispersion[column].astype(float).round(3)
+
+    # ---------------------------------------------------------
+    # Combine global test + group summary into one CSV.
+    #
+    # The first section contains the omnibus test.
+    # The second section contains group-level dispersion.
+    # ---------------------------------------------------------
+
+    global_dispersion_path = os.path.join(
+        output_dir,
+        f"table{table_dispersion}_dispersion_A.csv",
+    )
+
+    with open(
+        global_dispersion_path,
+        "w",
+        encoding="utf-8",
+        newline="",
+    ) as f:
+
+        f.write("Global PERMDISP\n")
+        global_dispersion.to_csv(
+            f,
+            sep=";",
+            index=False,
+        )
+
+        f.write("\n")
+        f.write("Dispersion by compartment\n")
+        group_dispersion.to_csv(
+            f,
+            sep=";",
+            index=False,
+        )
+
+    # =========================================================
+    # =========================================================
+    # TABLE S6B — PAIRWISE DISPERSION
+    # =========================================================
+    # =========================================================
+
+    dispersion_pairwise = dispersion_pairwise.rename(
+        columns={
+            "group1": "Group_1",
+            "group2": "Group_2",
+            "p": "P_value",
+            "p_adj": "P_value_BH",
+        }
+    )
+
+    table_S6B = dispersion_pairwise[
+        [
+            "Group_1",
+            "Group_2",
+            "Mann_Whitney_U",
+            "P_value",
+            "P_value_BH",
+            "n1",
+            "n2",
+        ]
+    ].copy()
+
+    table_S6B["Mann_Whitney_U"] = (
+        pd.to_numeric(
+            table_S6B["Mann_Whitney_U"],
+            errors="coerce",
+        )
+        .round(0)
+        .astype("Int64")
+    )
+
+    table_S6B["P_value"] = table_S6B["P_value"].astype(float).apply(format_pvalue)
+
+    table_S6B["P_value_BH"] = table_S6B["P_value_BH"].astype(float).apply(format_pvalue)
+
+    table_S6B.to_csv(
+        os.path.join(
+            output_dir,
+            f"table{table_dispersion}_dispersion_B.csv",
+        ),
+        sep=";",
+        index=False,
+    )
+
+    # =========================================================
+    # Return tables
+    # =========================================================
+
+    return {
+        "S5A": table_S5A,
+        "S5B": table_S5B,
+        "S6A_global": global_dispersion,
+        "S6A_group_summary": group_dispersion,
+        "S6B": table_S6B,
+    }
+
+
+def plasmid_carriage_counting(df_in: pd.DataFrame, df_isolates_in: pd.DataFrame):
     """
     Descriptive statistics on the number of plasmids carried by
     isolates
@@ -274,17 +674,21 @@ def plasmid_carriage_counting(df_in: pd.DataFrame):
     df = df_in.copy()
 
     # Create isolate-level data
-    isolate_df = df[
-        [
-            "Parent",
-            "ISOLATE_TL_MLST_ST",
-            "origin",
+    isolate_df = (
+        df_isolates_in[
+            [
+                "KEY",
+                "ISOLATE_TL_MLST_ST",
+                "origin",
+            ]
         ]
-    ].drop_duplicates()
+        .rename(columns={"KEY": "Parent"})
+        .drop_duplicates()
+    )
 
     # Determine significant/common STs based on the number of isolates
     isolate_st_counts = isolate_df["ISOLATE_TL_MLST_ST"].value_counts()
-    common_STs = isolate_st_counts[isolate_st_counts >= 10].index
+    common_STs = isolate_st_counts[isolate_st_counts >= 25].index
     isolate_df["ST_collapsed"] = isolate_df["ISOLATE_TL_MLST_ST"].where(
         isolate_df["ISOLATE_TL_MLST_ST"].isin(common_STs),
         "rare_ST",
@@ -298,17 +702,16 @@ def plasmid_carriage_counting(df_in: pd.DataFrame):
         plasmid_counts,
         on="Parent",
         how="left",
-    )
-
-    # Add the 0-plasmid isolates
-    no_plasmids = pd.read_csv("data/isolates_without_plasmids.csv", sep=";")
-    no_plasmids["plasmid_count"] = 0
-    analysis_df = pd.concat([analysis_df, no_plasmids])
+    ).fillna(0)
 
     # Sanity check
     print(analysis_df)
-    print(analysis_df["plasmid_count"].describe())
-    print(analysis_df.groupby("origin")["plasmid_count"].describe())
+    analysis_df["plasmid_count"].describe().to_csv(
+        "results/dataset_overview/carriage_rates.csv", sep=";"
+    )
+    analysis_df.groupby("origin")["plasmid_count"].describe().to_csv(
+        "results/dataset_overview/origin_carriage_rates.csv", sep=";"
+    )
 
     # Save counts
     analysis_df.to_csv(
@@ -446,157 +849,225 @@ def test_gene_origin_association(
     plasmid_gene_binary: pd.DataFrame,
     origin_col: str = "origin",
     min_positive: int = 5,
-    n_permutations: int = 2000,
+    n_permutations: int = 20000,
     random_state: int = 0,
 ):
     """
     Test whether a gene's presence/absence is associated with plasmid
-    origin/compartment (designed for a 4-way comparison, e.g.
-    LA-MRSA / HA-MRSA / CA-MRSA / other).
+    epidemiological origin/compartment.
 
     Statistics reported
     --------------------
-    - Omnibus chi-square test (Pearson) across all compartments, with
-      Cramer's V as effect size (correct generalization for r x c tables,
-      not just 2x2).
-    - A Monte-Carlo permutation p-value (`p_chi2_perm`) for the same
-      chi-square statistic. Use this instead of `p_chi2` whenever
-      `low_expected_counts` is True, since the asymptotic chi-square
-      p-value is unreliable when >20% of expected cell counts are < 5
-      (common here, since many genes will be rare in 1-2 compartments).
-    - Post-hoc pairwise tests: for each compartment vs. the other three
-      pooled, a 2x2 Fisher exact test (odds ratio + p-value), BH-corrected
-      across the 4 compartments. Use this to see which compartment(s)
-      drive a significant omnibus result.
+    - Pearson chi-square statistic
+    - Asymptotic chi-square p-value
+    - Monte-Carlo permutation p-value
+    - Cramer's V as effect size
+    - Expected-count diagnostic
+    - Observed gene-positive/gene-negative counts per origin
+    - Gene prevalence per origin
+    - Pearson standardized residuals
 
-    Parameters
-    ----------
-    gene : str
-        Gene name (column in plasmid_gene_binary)
-    plasmid_gene_binary : pd.DataFrame
-        Plasmid-level binary gene matrix (0/1 columns), must also contain
-        `origin_col`
-    origin_col : str
-        Column with the 4 compartment/origin labels
-    min_positive : int
-        Minimum number of gene-positive plasmids required to test
-    n_permutations : int
-        Number of label-shuffling permutations for the Monte-Carlo p-value
-    random_state : int
-        Seed for reproducibility
+    The permutation p-value is the preferred inferential statistic when
+    expected cell counts are sparse.
 
     Returns
     -------
     dict
-        statistics output for the input gene
+        Flat dictionary suitable for conversion to a DataFrame.
     """
-    # Set RNG
+
     rng = np.random.default_rng(random_state)
 
-    # Get metadata as series (gene + origin)
+    # ------------------------------------------------------------------
+    # Get gene and origin data
+    # ------------------------------------------------------------------
     gene_status = plasmid_gene_binary[gene]
     origin = plasmid_gene_binary[origin_col]
 
-    # Check if gene presence meets threshold
+    # Remove missing values
+    valid = gene_status.notna() & origin.notna()
+
+    gene_status = gene_status.loc[valid].astype(int)
+    origin = origin.loc[valid]
+
+    # ------------------------------------------------------------------
+    # Basic counts
+    # ------------------------------------------------------------------
     n_pos = int((gene_status == 1).sum())
     n_neg = int((gene_status == 0).sum())
+
     if n_pos < min_positive:
         return {
             "gene": gene,
-            "n_gene_positive": n_pos,
             "tested": False,
+            "n_gene_positive": n_pos,
+            "n_gene_negative": n_neg,
             "reason": "Too few gene-positive plasmids",
         }
 
-    # Create contingency table for chi2
-    contingency = pd.crosstab(gene_status, origin)
-    contingency.index = ["gene_negative", "gene_positive"]
+    # ------------------------------------------------------------------
+    # Contingency table
+    # ------------------------------------------------------------------
+    contingency = pd.crosstab(
+        gene_status,
+        origin,
+    )
 
-    # Perform chi2
-    chi2, p_chi2, dof, expected = chi2_contingency(contingency)
-    low_expected_counts = bool((expected < 5).mean() > 0.2)
+    # Ensure both gene-negative and gene-positive rows exist
+    contingency = contingency.reindex(
+        index=[0, 1],
+        fill_value=0,
+    )
 
-    # Monte-Carlo permutation p-value (label shuffling of origin)
-    origin_values = origin.to_numpy()
-    gene_values = gene_status.to_numpy()
-    perm_chi2 = np.empty(n_permutations)
-    for i in range(n_permutations):
-        shuffled = rng.permutation(origin_values)
-        perm_table = pd.crosstab(gene_values, shuffled)
-        perm_chi2[i], _, _, _ = chi2_contingency(perm_table)
-    p_chi2_perm = (np.sum(perm_chi2 >= chi2) + 1) / (n_permutations + 1)
-
-    # Calculate statistcs
-    n = contingency.to_numpy().sum()
-    cramers_v = np.sqrt(chi2 / (n * (min(contingency.shape) - 1)))
-    residuals = (contingency - expected) / np.sqrt(expected)
-
-    # Post-hoc: each compartment vs. the rest, Fisher exact (2x2), BH-corrected
-    posthoc_rows = []
-    for compartment in contingency.columns:
-        two_by_two = pd.DataFrame(
-            {
-                compartment: contingency[compartment],
-                "Other": contingency.drop(columns=compartment).sum(axis=1),
-            }
-        )
-        odds_ratio, p_fisher = fisher_exact(two_by_two)
-        posthoc_rows.append(
-            {"compartment": compartment, "odds_ratio": odds_ratio, "p_fisher": p_fisher}
-        )
-
-    # Create dataframe
-    posthoc_df = pd.DataFrame(posthoc_rows)
-    posthoc_df["p_fisher_adj"] = multipletests(posthoc_df["p_fisher"], method="fdr_bh")[
-        1
+    contingency.index = [
+        "gene_negative",
+        "gene_positive",
     ]
 
-    return {
+    # Remove pandas axis name ("origin")
+    contingency.columns.name = None
+
+    # ------------------------------------------------------------------
+    # Pearson chi-square test
+    # ------------------------------------------------------------------
+    chi2, p_chi2, dof, expected = chi2_contingency(contingency)
+
+    # Proportion of expected cells < 5
+    low_expected_counts = bool((expected < 5).mean() > 0.20)
+
+    # ------------------------------------------------------------------
+    # Monte-Carlo permutation p-value
+    #
+    # Origin labels are shuffled while preserving the observed
+    # number of plasmids in each origin.
+    # ------------------------------------------------------------------
+    origin_values = origin.to_numpy()
+    gene_values = gene_status.to_numpy()
+
+    perm_chi2 = np.empty(n_permutations)
+
+    for i in range(n_permutations):
+
+        shuffled_origin = rng.permutation(origin_values)
+
+        perm_table = pd.crosstab(
+            gene_values,
+            shuffled_origin,
+        )
+
+        # Ensure exactly the same rows/columns as observed table
+        perm_table = perm_table.reindex(
+            index=[0, 1],
+            columns=contingency.columns,
+            fill_value=0,
+        )
+
+        perm_chi2[i], _, _, _ = chi2_contingency(perm_table)
+
+    # +1 correction prevents p = 0
+    p_chi2_perm = (np.sum(perm_chi2 >= chi2) + 1) / (n_permutations + 1)
+
+    # ------------------------------------------------------------------
+    # Cramer's V
+    # ------------------------------------------------------------------
+    n = contingency.to_numpy().sum()
+
+    cramers_v = np.sqrt(chi2 / (n * (min(contingency.shape) - 1)))
+
+    # ------------------------------------------------------------------
+    # Standardized Pearson residuals
+    # ------------------------------------------------------------------
+    residuals = (contingency.to_numpy() - expected) / np.sqrt(expected)
+
+    residuals = pd.DataFrame(
+        residuals,
+        index=contingency.index,
+        columns=contingency.columns,
+    )
+
+    # ------------------------------------------------------------------
+    # Start flat result dictionary
+    # ------------------------------------------------------------------
+    result = {
         "gene": gene,
         "tested": True,
         "n_gene_positive": n_pos,
         "n_gene_negative": n_neg,
         "chi2": chi2,
+        "dof": dof,
         "p_chi2": p_chi2,
         "p_chi2_perm": p_chi2_perm,
         "low_expected_counts": low_expected_counts,
         "cramers_v": cramers_v,
-        "contingency": contingency,
-        "residuals": residuals,
-        "posthoc": posthoc_df,
     }
+
+    # ------------------------------------------------------------------
+    # Add origin-specific counts, prevalence and residuals
+    # ------------------------------------------------------------------
+    for compartment in contingency.columns:
+
+        n_negative = int(
+            contingency.loc[
+                "gene_negative",
+                compartment,
+            ]
+        )
+
+        n_positive = int(
+            contingency.loc[
+                "gene_positive",
+                compartment,
+            ]
+        )
+
+        n_total = n_negative + n_positive
+
+        # Observed counts
+        result[f"neg_{compartment}"] = n_negative
+
+        result[f"pos_{compartment}"] = n_positive
+
+        # Prevalence of the gene within the origin
+        if n_total > 0:
+            result[f"prev_{compartment}"] = n_positive / n_total
+        else:
+            result[f"prev_{compartment}"] = np.nan
+
+        # Standardized residuals
+        result[f"resid_neg_{compartment}"] = residuals.loc[
+            "gene_negative",
+            compartment,
+        ]
+
+        result[f"resid_pos_{compartment}"] = residuals.loc[
+            "gene_positive",
+            compartment,
+        ]
+
+    return result
 
 
 def gene_origin_enrichment(
     df_in: pd.DataFrame,
-    min_positive: int = 10,
-    n_permutations: int = 2000,
+    min_positive: int = 5,
+    n_permutations: int = 20000,
     random_state: int = 0,
 ) -> pd.DataFrame:
     """
-    Gene presence/absence vs. plasmid origin/compartment (4 categories).
-
-    Parameters
-    ----------
-    df_in : pd.DataFrame
-        Must contain 'Plasmid', 'origin', and the gene-list columns
-        ["amr", "virulence", "metal", "biocide", "heat", "acid"]
-    min_positive : int
-        Minimum gene-positive plasmids required to test a gene
-    n_permutations : int
-        Permutations for the Monte-Carlo chi-square p-value
-    random_state : int
-        Seed
+    Test gene presence/absence against plasmid epidemiological origin.
 
     Returns
     -------
     pd.DataFrame
-        One row per tested gene, sorted by p_chi2, with BH-adjusted
-        p-values for both the asymptotic and permutation chi-square tests.
+        Flat, one-row-per-gene results table suitable for supplementary
+        material and export to CSV/Excel.
     """
+
     df = df_in.copy()
 
-    # column names to include
+    # ------------------------------------------------------------------
+    # Gene-list columns
+    # ------------------------------------------------------------------
     gene_columns = [
         config.AMR_COL,
         config.VIR_COL,
@@ -604,69 +1075,123 @@ def gene_origin_enrichment(
         config.BIOCIDE_COL,
     ]
 
-    # Convert to long format
+    # ------------------------------------------------------------------
+    # Convert gene lists to long format
+    # ------------------------------------------------------------------
     long_genes = (
         df.set_index("Plasmid")[gene_columns]
         .stack()
         .reset_index(level=1, drop=True)
         .reset_index(name="gene_list")
     )
+
     long_genes = (
         long_genes.dropna(subset=["gene_list"])
         .assign(gene=lambda x: x["gene_list"].str.split(","))
         .explode("gene")
     )
+
     long_genes["gene"] = long_genes["gene"].str.strip()
 
-    # Get all the (unique) gene names
+    # Remove empty gene names
+    long_genes = long_genes[long_genes["gene"].ne("")]
+
     gene_names = sorted(long_genes["gene"].unique())
+
     print(f"{len(gene_names)} unique genes")
 
-    ## Plasmid x gene binary matrix
+    # ------------------------------------------------------------------
+    # Plasmid × gene binary matrix
+    # ------------------------------------------------------------------
     plasmid_gene_matrix = long_genes.assign(present=1).pivot_table(
-        index="Plasmid", columns="gene", values="present", aggfunc="max", fill_value=0
+        index="Plasmid",
+        columns="gene",
+        values="present",
+        aggfunc="max",
+        fill_value=0,
     )
-    all_plasmids = df["Plasmid"].unique()
-    plasmid_gene_matrix = plasmid_gene_matrix.reindex(all_plasmids, fill_value=0)
 
+    all_plasmids = df["Plasmid"].unique()
+
+    plasmid_gene_matrix = plasmid_gene_matrix.reindex(
+        all_plasmids,
+        fill_value=0,
+    )
+
+    # ------------------------------------------------------------------
+    # Add origin metadata
+    # ------------------------------------------------------------------
     metadata = df[["Plasmid", "origin"]].drop_duplicates().set_index("Plasmid")
+
     plasmid_gene_binary = plasmid_gene_matrix.join(metadata)
 
-    ## Test each gene against origin
-    results = [
-        test_gene_origin_association(
-            gene,
-            plasmid_gene_binary,
+    # ------------------------------------------------------------------
+    # Test every gene
+    # ------------------------------------------------------------------
+    results = []
+
+    for gene in gene_names:
+
+        result = test_gene_origin_association(
+            gene=gene,
+            plasmid_gene_binary=plasmid_gene_binary,
             origin_col="origin",
             min_positive=min_positive,
             n_permutations=n_permutations,
             random_state=random_state,
         )
-        for gene in gene_names
-    ]
 
-    results_df = pd.DataFrame(results).query("tested == True").sort_values("p_chi2")
+        results.append(result)
 
-    # Add multiple testing correction
-    results_df["p_chi2_adj"] = multipletests(results_df["p_chi2"], method="fdr_bh")[1]
-    results_df["p_chi2_perm_adj"] = multipletests(
-        results_df["p_chi2_perm"], method="fdr_bh"
+    # ------------------------------------------------------------------
+    # Create flat results DataFrame
+    # ------------------------------------------------------------------
+    results_df = pd.DataFrame(results)
+
+    # Keep only tested genes
+    results_df = results_df[results_df["tested"]].copy()
+
+    # ------------------------------------------------------------------
+    # Multiple-testing correction across genes
+    # ------------------------------------------------------------------
+    results_df["p_chi2_adj"] = multipletests(
+        results_df["p_chi2"],
+        method="fdr_bh",
     )[1]
 
-    print(
-        results_df[
-            [
-                "gene",
-                "n_gene_positive",
-                "p_chi2",
-                "p_chi2_adj",
-                "p_chi2_perm",
-                "p_chi2_perm_adj",
-                "cramers_v",
-                "low_expected_counts",
-            ]
-        ]
-    )
+    results_df["p_chi2_perm_adj"] = multipletests(
+        results_df["p_chi2_perm"],
+        method="fdr_bh",
+    )[1]
+
+    # ------------------------------------------------------------------
+    # Sort by primary permutation p-value
+    # ------------------------------------------------------------------
+    results_df = results_df.sort_values("p_chi2_perm").reset_index(drop=True)
+
+    # ------------------------------------------------------------------
+    # Round numerical values for supplementary table
+    # ------------------------------------------------------------------
+    numeric_cols = results_df.select_dtypes(include="number").columns
+
+    results_df[numeric_cols] = results_df[numeric_cols].round(4)
+
+    # ------------------------------------------------------------------
+    # Primary results for console display
+    # ------------------------------------------------------------------
+    primary_cols = [
+        "gene",
+        "n_gene_positive",
+        "n_gene_negative",
+        "chi2",
+        "dof",
+        "p_chi2_perm",
+        "p_chi2_perm_adj",
+        "cramers_v",
+        "low_expected_counts",
+    ]
+
+    print(results_df[primary_cols].to_string(index=False))
 
     return results_df
 
@@ -725,8 +1250,8 @@ def count_column_composition_by_cluster(
 
         split_df[column_col] = split_df[column_col].str.strip()
 
-        # Remove duplicate category combinations within a row
-        split_df = split_df.drop_duplicates()
+        # # Remove duplicate category combinations within a row
+        # split_df = split_df.drop_duplicates()
 
         counts = pd.crosstab(
             split_df[row_col],
@@ -741,35 +1266,52 @@ def count_column_composition_by_cluster(
 
 
 def build_plasmidome_distance(
-    df: pd.DataFrame, isolate_col: str = "Parent", origin_col: str = "origin"
+    df: pd.DataFrame,
+    isolate_col: str = "Parent",
+    origin_col: str = "origin",
 ):
     """
-    Build a Jaccard distance matrix between isolates based on which
-    plasmid backbone clusters they carry (presence/absence "plasmidome").
+    Build a Jaccard distance matrix between isolates based on
+    plasmid backbone-cluster presence/absence ("plasmidome").
+
+    Each isolate is represented as a binary vector indicating whether
+    each plasmid backbone cluster is present.
 
     Parameters
     ----------
     df : pd.DataFrame
-        Dataframe containing plasmids, clusters, and associated isolate
-    isolate_col : str, optional
-        Column name where isolate id is stored, by default "Parent"
-    origin_col : str, optional
-        Column name where the epidiomological origin is stored, by default "origin"
+        Dataframe containing isolate IDs, plasmid backbone clusters,
+        and epidemiological origin.
+    isolate_col : str, default="Parent"
+        Column containing isolate IDs.
+    origin_col : str, default="origin"
+        Column containing epidemiological origin.
 
     Returns
     -------
-    DistanceMatrix, pd.DataFrame
-        The distance matrix and metadata dataframe
+    dm : skbio.DistanceMatrix
+        Isolate-by-isolate Jaccard distance matrix.
+    metadata : pd.DataFrame
+        Metadata indexed by isolate ID.
+    isolate_cluster_matrix : pd.DataFrame
+        Binary isolate-by-cluster presence/absence matrix.
     """
-    CLUSTER_COL = str(config.CLUSTER_COL)
-    df_unique = df[[isolate_col, CLUSTER_COL]].drop_duplicates()
+    cluster_col = str(config.CLUSTER_COL)
 
+    # One observation per isolate × cluster.
+    df_unique = df[[isolate_col, cluster_col]].drop_duplicates()
+
+    # Binary plasmidome matrix.
     isolate_cluster_matrix = (
-        pd.crosstab(df_unique[isolate_col], df_unique[CLUSTER_COL])
+        pd.crosstab(
+            df_unique[isolate_col],
+            df_unique[cluster_col],
+        )
         .astype(bool)
         .astype(int)
     )
 
+    # Metadata corresponding exactly to isolates in the distance matrix.
     metadata = (
         df[[isolate_col, origin_col]]
         .drop_duplicates()
@@ -777,303 +1319,801 @@ def build_plasmidome_distance(
         .loc[isolate_cluster_matrix.index]
     )
 
-    jaccard_distances = pdist(isolate_cluster_matrix.values, metric="jaccard")
-    dm = DistanceMatrix(
-        squareform(jaccard_distances), ids=isolate_cluster_matrix.index.tolist()
+    # Check that every isolate has exactly one origin.
+    origin_counts = (
+        df[[isolate_col, origin_col]].drop_duplicates().groupby(isolate_col).size()
     )
 
-    return dm, metadata
-
-
-def pairwise_permanova(dm, metadata, group_col="origin", n_perm=999):
-    """
-    Post-hoc pairwise PERMANOVA between each pair of compartments,
-    BH-corrected. A significant global (4-group) PERMANOVA only tells
-    you *some* compartments differ, not which ones -- this fills that gap.
-    """
-    groups = metadata[group_col].unique()
-    rows = []
-    for g1, g2 in combinations(groups, 2):
-        ids = metadata.index[metadata[group_col].isin([g1, g2])].tolist()
-        dm_sub = dm.filter(ids)
-        meta_sub = metadata.loc[ids]
-        res = permanova(
-            distance_matrix=dm_sub, grouping=meta_sub[group_col], permutations=n_perm
+    if not (origin_counts == 1).all():
+        bad = origin_counts[origin_counts != 1]
+        raise ValueError(
+            "Some isolates are associated with multiple origins:\n" f"{bad}"
         )
-        rows.append(
-            {
-                "group1": g1,
-                "group2": g2,
-                "F": res["test statistic"],
-                "p": res["p-value"],
-                "n1": int((meta_sub[group_col] == g1).sum()),
-                "n2": int((meta_sub[group_col] == g2).sum()),
-            }
-        )
-    pairwise_df = pd.DataFrame(rows)
-    pairwise_df["p_adj"] = multipletests(pairwise_df["p"], method="fdr_bh")[1]
-    return pairwise_df.sort_values("p")
+
+    # Jaccard distance on binary plasmidome profiles.
+    jaccard_distances = pdist(
+        isolate_cluster_matrix.values,
+        metric="jaccard",
+    )
+
+    dm = DistanceMatrix(
+        squareform(jaccard_distances),
+        ids=isolate_cluster_matrix.index.tolist(),
+    )
+
+    return dm, metadata, isolate_cluster_matrix
 
 
-def distance_to_centroid(coords, metadata, group_col):
+def permanova_r2(
+    F: float,
+    n: int,
+    n_groups: int,
+) -> float:
     """
-    Multivariate dispersion per isolate: distance from the isolate's PCoA
-    position to its group's centroid. Same quantity tested by
-    PERMDISP/betadisper -- a required companion to PERMANOVA, since
-    PERMANOVA can be significant either because groups differ in
-    *location* (true composition) or in *dispersion* (within-group
-    variability), and the two need to be told apart before interpreting
-    the PERMANOVA result.
-    """
-    id_name = metadata.index.name or "id"
-    merged = coords.join(metadata[group_col])
-    rows = []
-    for group, subdf in merged.groupby(group_col):
-        if len(subdf) < 2:
-            continue
-        centroid = subdf.drop(columns=group_col).mean(axis=0)
-        dists = np.linalg.norm(
-            subdf.drop(columns=group_col).values - centroid.values, axis=1
-        )
-        rows.extend(zip(subdf.index, [group] * len(dists), dists))
-    return pd.DataFrame(
-        rows, columns=[id_name, group_col, "distance_to_centroid"]
-    ).set_index(id_name)
+    Calculate PERMANOVA R² from the pseudo-F statistic.
 
+    R² represents the proportion of variation in the distance matrix
+    attributable to the grouping variable.
 
-def compartment_plasmidome_dispersion(
-    df_in: pd.DataFrame, cluster_col: str, n_perm=999
-):
-    """
-    Test whether plasmidome composition (plasmid backbone cluster
-    presence/absence) differs significantly between the 4 origin
-    compartments.
-
-    Two complementary tests are run, both as a global (4-group) omnibus
-    test followed by BH-corrected pairwise post-hoc tests:
-
-      1. PERMANOVA -- do compartments differ in composition (centroid
-         location in Jaccard-distance space)?
-      2. Dispersion (PERMDISP-style: distance-to-centroid + Kruskal-Wallis,
-         then pairwise Mann-Whitney) -- do compartments differ in
-         within-group variability? A significant PERMANOVA alongside a
-         significant dispersion difference means the PERMANOVA result may
-         partly/wholly reflect dispersion rather than a true compositional
-         shift, so this needs to be checked before interpreting #1.
+    Formula:
+        R² = 1 / [1 + ((n - g) / ((g - 1) * F))]
 
     Parameters
     ----------
-    df_in : pd.DataFrame
-        Must contain 'Parent' (isolate id), cluster_col
-        (plasmid backbone cluster), and 'origin' (compartment, 4 levels)
-    cluster_col : str
-        Column name containing the cluster IDs
-    n_perm : int
-        Number of permutations for PERMANOVA
+    F : float
+        PERMANOVA pseudo-F statistic.
+    n : int
+        Number of observations.
+    n_groups : int
+        Number of groups.
+
+    Returns
+    -------
+    float
+        PERMANOVA R².
+    """
+    if F <= 0:
+        return 0.0
+
+    return 1.0 / (1.0 + ((n - n_groups) / ((n_groups - 1) * F)))
+
+
+def pairwise_permanova(
+    dm,
+    metadata: pd.DataFrame,
+    group_col: str = "origin",
+    n_perm: int = 999,
+    seed: int = 42,
+):
+    """
+    Pairwise PERMANOVA between all groups.
+
+    P-values are corrected using Benjamini-Hochberg FDR.
+
+    Returns pseudo-F, p-value, BH-adjusted p-value, sample sizes,
+    and pairwise PERMANOVA R².
+    """
+    groups = metadata[group_col].dropna().unique()
+
+    rows = []
+
+    for g1, g2 in combinations(groups, 2):
+
+        ids = metadata.index[metadata[group_col].isin([g1, g2])].tolist()
+
+        dm_sub = dm.filter(ids)
+        meta_sub = metadata.loc[ids]
+
+        res = permanova(
+            distance_matrix=dm_sub,
+            grouping=meta_sub[group_col],
+            permutations=n_perm,
+            seed=seed,
+        )
+
+        F = float(res["test statistic"])
+        p = float(res["p-value"])
+
+        n1 = int((meta_sub[group_col] == g1).sum())
+        n2 = int((meta_sub[group_col] == g2).sum())
+
+        n_total = n1 + n2
+
+        r2 = permanova_r2(
+            F=F,
+            n=n_total,
+            n_groups=2,
+        )
+
+        rows.append(
+            {
+                "Group_1": g1,
+                "Group_2": g2,
+                "F": F,
+                "P_value": p,
+                "n1": n1,
+                "n2": n2,
+                "R2": r2,
+            }
+        )
+
+    pairwise_df = pd.DataFrame(rows)
+
+    pairwise_df["P_value_BH"] = multipletests(
+        pairwise_df["P_value"],
+        method="fdr_bh",
+    )[1]
+
+    return pairwise_df.sort_values("P_value_BH").reset_index(drop=True)
+
+
+def distance_to_centroid(
+    coords: pd.DataFrame,
+    metadata: pd.DataFrame,
+    group_col: str,
+):
+    """
+    Calculate Euclidean distance from every isolate to the arithmetic
+    centroid of its group in PCoA space.
+
+    IMPORTANT
+    ---------
+    For scikit-bio 0.7.3, `pcoa(...).samples` already contains the
+    eigenvalue-scaled principal coordinates. Do NOT multiply the
+    coordinates by sqrt(eigenvalue) again.
+    """
+    id_name = metadata.index.name or "id"
+
+    merged = coords.join(
+        metadata[[group_col]],
+        how="inner",
+    )
+
+    coordinate_columns = coords.columns
+
+    rows = []
+
+    for group, subdf in merged.groupby(group_col):
+
+        if len(subdf) < 2:
+            continue
+
+        group_coords = subdf[coordinate_columns]
+
+        # Arithmetic centroid.
+        centroid = group_coords.mean(axis=0)
+
+        # Euclidean distance to centroid.
+        distances = np.linalg.norm(
+            group_coords.values - centroid.values,
+            axis=1,
+        )
+
+        rows.extend(
+            zip(
+                subdf.index,
+                [group] * len(distances),
+                distances,
+            )
+        )
+
+    return pd.DataFrame(
+        rows,
+        columns=[
+            id_name,
+            group_col,
+            "distance_to_centroid",
+        ],
+    ).set_index(id_name)
+
+
+def summarize_dispersion(
+    disp_df: pd.DataFrame,
+    group_col: str = "origin",
+):
+    """
+    Summarize distance-to-centroid distributions by group.
+    """
+    summary = (
+        disp_df.groupby(group_col)["distance_to_centroid"]
+        .agg(
+            median="median",
+            Q1=lambda x: x.quantile(0.25),
+            Q3=lambda x: x.quantile(0.75),
+            mean="mean",
+            SD="std",
+            n="count",
+        )
+        .sort_values("median", ascending=False)
+    )
+
+    return summary
+
+
+def pairwise_dispersion(
+    disp_df: pd.DataFrame,
+    group_col: str = "origin",
+):
+    """
+    Pairwise Mann-Whitney tests on distance-to-centroid values.
+
+    These are post-hoc comparisons of the dispersion distributions,
+    with Benjamini-Hochberg FDR correction.
+
+    Note:
+        These Mann-Whitney tests are descriptive/post-hoc comparisons.
+        The formal omnibus multivariate dispersion test is PERMDISP.
+    """
+    groups = disp_df[group_col].dropna().unique()
+
+    rows = []
+
+    for g1, g2 in combinations(groups, 2):
+
+        x = disp_df.loc[
+            disp_df[group_col] == g1,
+            "distance_to_centroid",
+        ].values
+
+        y = disp_df.loc[
+            disp_df[group_col] == g2,
+            "distance_to_centroid",
+        ].values
+
+        U, p = mannwhitneyu(
+            x,
+            y,
+            alternative="two-sided",
+        )
+
+        rows.append(
+            {
+                "Group_1": g1,
+                "Group_2": g2,
+                "Mann_Whitney_U": U,
+                "P_value": p,
+                "n1": len(x),
+                "n2": len(y),
+            }
+        )
+
+    result = pd.DataFrame(rows)
+
+    result["P_value_BH"] = multipletests(
+        result["P_value"],
+        method="fdr_bh",
+    )[1]
+
+    return result.sort_values("P_value_BH").reset_index(drop=True)
+
+
+def compartment_plasmidome_dispersion(
+    df_in: pd.DataFrame,
+    n_perm: int = 999,
+    seed: int = 42,
+    group_col: str = "origin",
+):
+    """
+    Complete plasmidome composition and dispersion analysis.
+
+    Analysis
+    --------
+    1. Construct isolate × plasmid-backbone-cluster presence/absence matrix.
+    2. Calculate pairwise Jaccard distances.
+    3. Global PERMANOVA across all compartments.
+    4. Pairwise PERMANOVA with BH correction.
+    5. PCoA of the Jaccard distance matrix.
+    6. Calculate isolate-to-centroid distances using the already-scaled
+       PCoA coordinates from scikit-bio 0.7.3.
+    7. Summarize dispersion by compartment.
+    8. Formal omnibus PERMDISP test.
+    9. Pairwise Mann-Whitney comparisons of dispersion with BH correction.
 
     Returns
     -------
     dict
+        All distance, composition, PCoA, PERMANOVA, and dispersion results.
     """
+
     df = df_in.copy()
 
-    dm, metadata = build_plasmidome_distance(df, cluster_col)
+    # =========================================================
+    # 1. Jaccard plasmidome distance matrix
+    # =========================================================
+    dm, metadata, isolate_cluster_matrix = build_plasmidome_distance(
+        df,
+        # group_col=group_col,
+    )
 
-    ## Global PERMANOVA (omnibus, all 4 compartments)
+    grouping = metadata[group_col]
+
+    # =========================================================
+    # 2. Global PERMANOVA
+    # =========================================================
     global_res = permanova(
-        distance_matrix=dm, grouping=metadata["origin"], permutations=n_perm
+        distance_matrix=dm,
+        grouping=grouping,
+        permutations=n_perm,
+        seed=seed,
     )
-    print("Global PERMANOVA (origin):")
-    print(global_res)
 
-    ## Pairwise PERMANOVA post-hoc
-    pairwise_res = pairwise_permanova(dm, metadata, group_col="origin", n_perm=n_perm)
-    print("\nPairwise PERMANOVA (BH-corrected):")
-    print(pairwise_res)
+    global_F = float(global_res["test statistic"])
 
-    ## Dispersion (PERMDISP-style) test
+    global_p = float(global_res["p-value"])
+
+    n_total = len(metadata)
+    n_groups = grouping.nunique()
+
+    global_r2 = permanova_r2(
+        F=global_F,
+        n=n_total,
+        n_groups=n_groups,
+    )
+
+    # =========================================================
+    # 3. Pairwise PERMANOVA
+    # =========================================================
+    pairwise_res = pairwise_permanova(
+        dm=dm,
+        metadata=metadata,
+        group_col=group_col,
+        n_perm=n_perm,
+        seed=seed,
+    )
+
+    # =========================================================
+    # 4. PCoA
+    # =========================================================
     pcoa_res = pcoa(dm)
-    coords_weighted = pcoa_res.samples.copy()
-    for i, eig in enumerate(pcoa_res.eigvals):
-        coords_weighted.iloc[:, i] *= np.sqrt(eig) if eig > 0 else 0.0
 
-    disp_df = distance_to_centroid(coords_weighted, metadata, "origin")
+    # IMPORTANT:
+    # scikit-bio 0.7.3 already returns eigenvalue-scaled
+    # principal coordinates in pcoa_res.samples.
+    coords = pcoa_res.samples.copy()
 
-    disp_summary = (
-        disp_df.groupby("origin")["distance_to_centroid"]
-        .median()
-        .rename("median")
-        .to_frame()
+    # =========================================================
+    # 5. Distances to group centroids
+    # =========================================================
+    disp_df = distance_to_centroid(
+        coords=coords,
+        metadata=metadata,
+        group_col=group_col,
     )
-    disp_summary["Q1"] = disp_df.groupby("origin")["distance_to_centroid"].quantile(
-        0.25
-    )
-    disp_summary["Q3"] = disp_df.groupby("origin")["distance_to_centroid"].quantile(
-        0.75
-    )
-    disp_summary = disp_summary.sort_values("median", ascending=False)
-    print("\nDispersion by compartment:")
-    print(disp_summary)
 
-    groups_comp = [
-        disp_df.loc[disp_df["origin"] == g, "distance_to_centroid"].values
-        for g in disp_df["origin"].unique()
-    ]
-    stat, pval = kruskal(*groups_comp)
-    print(f"\nOmnibus dispersion test (Kruskal-Wallis): H={stat:.2f}, p={pval:.4e}")
+    # =========================================================
+    # 6. Dispersion summary
+    # =========================================================
+    disp_summary = summarize_dispersion(
+        disp_df,
+        group_col=group_col,
+    )
 
-    ## Pairwise dispersion post-hoc (Mann-Whitney, BH-corrected)
-    disp_pairs = []
-    for g1, g2 in combinations(disp_df["origin"].unique(), 2):
-        x = disp_df.loc[disp_df["origin"] == g1, "distance_to_centroid"]
-        y = disp_df.loc[disp_df["origin"] == g2, "distance_to_centroid"]
-        stat_mw, p_mw = mannwhitneyu(x, y)
-        disp_pairs.append({"group1": g1, "group2": g2, "U": stat_mw, "p": p_mw})
-    disp_pairs_df = pd.DataFrame(disp_pairs)
-    disp_pairs_df["p_adj"] = multipletests(disp_pairs_df["p"], method="fdr_bh")[1]
-    print("\nPairwise dispersion (Mann-Whitney, BH-corrected):")
-    print(disp_pairs_df.sort_values("p"))
+    # =========================================================
+    # 7. Formal PERMDISP
+    # =========================================================
+    permdisp_res = permdisp(
+        distance_matrix=dm,
+        grouping=grouping,
+        test="centroid",
+        permutations=n_perm,
+        seed=seed,
+    )
+
+    # =========================================================
+    # 8. Pairwise dispersion comparisons
+    # =========================================================
+    disp_pairs_df = pairwise_dispersion(
+        disp_df,
+        group_col=group_col,
+    )
 
     return {
         "distance_matrix": dm,
         "metadata": metadata,
+        "isolate_cluster_matrix": isolate_cluster_matrix,
+        "pcoa": pcoa_res,
+        "pcoa_coordinates": coords,
+        "dispersion_distances": disp_df,
         "global_permanova": global_res,
+        "global_permanova_R2": global_r2,
         "pairwise_permanova": pairwise_res,
+        "permdisp": permdisp_res,
         "dispersion_summary": disp_summary,
-        "dispersion_kruskal": (stat, pval),
         "dispersion_pairwise": disp_pairs_df,
     }
 
 
-def gene_spillover_analysis(
-    df_in: pd.DataFrame, cluster_col: str, group_col="origin", gene_columns=None
+def _build_category_date_index(
+    metadata_df: pd.DataFrame, category_col: str, date_col: str
+) -> dict:
+    """
+    Build, per category, a sorted array of sampling-date timestamps
+    (int64 ns) for *all* isolates in metadata_df (plasmid-bearing or
+    not). Used to binary-search how many isolates of a category were
+    sampled prior to a given date, i.e. the surveillance "opportunity"
+    window for that category.
+    """
+    idx = {}
+    dated = metadata_df.dropna(subset=[date_col])
+    for cat, sub in dated.groupby(category_col):
+        idx[cat] = np.sort(
+            sub[date_col].values.astype("datetime64[ns]").astype("int64")
+        )
+    return idx
+
+
+def _count_prior_isolates(idx: dict, category, date) -> float:
+    """Number of isolates of `category` sampled strictly before `date`."""
+    if pd.isna(date) or category not in idx:
+        return np.nan
+    ts = np.datetime64(date).astype("datetime64[ns]").astype("int64")
+    return float(np.searchsorted(idx[category], ts, side="left"))
+
+
+def _attach_dates(
+    df: pd.DataFrame, metadata_df: pd.DataFrame, parent_col: str, date_col: str
+) -> pd.DataFrame:
+    """
+    Attach date_col from metadata_df (indexed by parent_col) onto df
+    via parent_col. Handles the case where df already has a
+    same-named date column (avoids merge-suffix collisions) and
+    dtype mismatches between the two parent_col representations.
+    """
+    if date_col not in metadata_df.columns:
+        raise ValueError(f"'{date_col}' not found in metadata_df.")
+    if metadata_df.index.name != parent_col:
+        raise ValueError(
+            f"metadata_df must be indexed by '{parent_col}' "
+            f"(got index.name={metadata_df.index.name!r}). "
+            f"Did you forget metadata_df.set_index('{parent_col}')?"
+        )
+
+    dates = metadata_df[[date_col]].copy()
+    dates[date_col] = pd.to_datetime(dates[date_col], errors="coerce")
+    dates = dates.rename_axis(parent_col).reset_index()
+
+    if date_col in df.columns:
+        df = df.drop(columns=[date_col])
+
+    if df[parent_col].dtype != dates[parent_col].dtype:
+        df = df.copy()
+        df[parent_col] = df[parent_col].astype(str)
+        dates[parent_col] = dates[parent_col].astype(str)
+
+    merged = df.merge(dates, on=parent_col, how="left")
+
+    n_unmatched = merged[date_col].isna().sum()
+    if n_unmatched:
+        import warnings
+
+        warnings.warn(
+            f"{n_unmatched} of {len(merged)} rows had no matching "
+            f"'{date_col}' after joining metadata_df on '{parent_col}'."
+        )
+
+    return merged
+
+
+def _cluster_first_seen_per_category(
+    df: pd.DataFrame, category_col: str, date_col: str
+) -> dict:
+    """
+    For each (cluster, category), the earliest sampling date at which
+    that plasmid cluster was observed in that category — regardless
+    of gene content. Used as temporal context for gene-level novel
+    appearances: did the gene arrive together with the cluster's
+    first appearance in that category, or onto an already-established
+    cluster background?
+
+    Returns {(cluster, category): first_date}
+    """
+    dated = df.dropna(subset=[date_col])
+    first_seen = dated.groupby([CLUSTER_COL, category_col])[date_col].min()
+    return first_seen.to_dict()
+
+
+def analyze_cluster_gene_spillover(
+    df_in: pd.DataFrame,
+    metadata_df: pd.DataFrame,
+    category_col: str,
+    parent_col: str = "Parent",
+    date_col: str = "sampling_date",
+    min_restricted_carriers: int = 5,
+    min_prior_isolates_for_novel: int = 10,
+    cluster_cooccurrence_window_days: int = 14,
 ):
     """
-    Quantify gene spillover between compartments within plasmid clusters.
+    Analyze functional-gene distribution across plasmid clusters, with
+    a lightweight temporal read on spillover events.
+
+    Spillover:
+        A gene is present in plasmids from >1 category within the
+        same plasmid cluster.
+
+    Category restriction:
+        A gene is present in exactly 1 category within the same
+        plasmid cluster and is carried by at least
+        `min_restricted_carriers` plasmids. Genes present in exactly
+        1 category but below this threshold are neither spillover nor
+        restricted — they're separated, but too rare (yet) to treat
+        as an established category-specific pattern.
+
+    Neither classification implies HGT or transmission.
+
+    Temporal context (lightweight):
+        `metadata_df` provides the *full* isolate-level sampling
+        record (including isolates without any plasmid), keyed by
+        `parent_col`, and is used purely to establish, per category,
+        how much surveillance had happened by a given date.
+
+        For each category that carries a given gene within a cluster,
+        we find the date it first appears there and count how many
+        isolates of that same category had already been sampled by
+        that point. A category's first appearance is flagged
+        `novel_appearance` when the gene/cluster was already present
+        in another category before this category's first-seen date,
+        AND at least `min_prior_isolates_for_novel` isolates of this
+        category had already been sampled without it showing up. This
+        distinguishes a plausible new introduction from simply not
+        having sampled that category much yet.
+
+        We additionally check, per category, whether the gene's first
+        appearance coincides with the plasmid *cluster's* first
+        appearance in that category (within
+        `cluster_cooccurrence_window_days`) or whether the cluster was
+        already established there beforehand — see
+        `gene_cooccurs_with_cluster_first_appearance` in
+        cluster_gene_category_df.
+
+        This is descriptive only, not a transmission or HGT claim,
+        and is intended as a triage signal ahead of the more rigorous
+        downstream analysis.
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Must contain: plasmid, cluster, parent_col, category_col,
+        amr, virulence, metal, biocide.
+    metadata_df : pd.DataFrame
+        Isolate-level metadata (wider than df_in — includes isolates
+        with no plasmid), indexed by parent_col, containing
+        category_col and date_col.
+    category_col : str
+        Column defining the categories across which spillover is
+        assessed, e.g. "ST" or "origin". Must already exist in df_in.
+    parent_col : str
+        Column in df_in identifying the parent isolate, used to join
+        sampling dates from metadata_df.
+    date_col : str
+        Sampling date column in metadata_df.
+    min_restricted_carriers : int
+        Minimum number of plasmids carrying a gene for it to be
+        classified as category restricted.
+    min_prior_isolates_for_novel : int
+        Minimum number of previously-sampled isolates of a category
+        required for a later first-appearance to be flagged as a
+        novel appearance rather than just undersampling.
+    cluster_cooccurrence_window_days : int
+        Max gap (days) between the gene's first-seen date and the
+        cluster's first-seen date in a category for the gene to be
+        considered as having arrived together with the cluster.
+
+    Returns
+    -------
+    cluster_gene_df : pd.DataFrame
+        One row per cluster x gene_function x gene. Passed to
+        plot.spillover_summary.
+    cluster_gene_category_df : pd.DataFrame
+        One row per cluster x gene_function x gene x category —
+        the per-category detail (dates, novel_appearance, cluster
+        co-occurrence context) behind the summary table above.
     """
+    df = df_in.copy()
 
-    if gene_columns is None:
-        gene_columns = ["amr", "virulence", "metal", "biocide", "heat", "acid"]
+    gene_function_cols = ["amr", "virulence", "metal", "biocide"]
 
-    # Step 1: long-format gene table
-    long_genes = (
-        df_in.set_index("Plasmid")[gene_columns]
-        .stack()
-        .reset_index(level=1, drop=True)
-        .reset_index(name="gene_list")
+    required_cols = [
+        "Plasmid",
+        CLUSTER_COL,
+        parent_col,
+        category_col,
+        *gene_function_cols,
+    ]
+    missing_cols = [c for c in required_cols if c not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns in df_in: {missing_cols}")
+
+    meta_required = [category_col, date_col]
+    missing_meta = [c for c in meta_required if c not in metadata_df.columns]
+    if missing_meta:
+        raise ValueError(f"Missing required columns in metadata_df: {missing_meta}")
+
+    df = _attach_dates(df, metadata_df, parent_col, date_col)
+
+    category_date_idx = _build_category_date_index(metadata_df, category_col, date_col)
+    cluster_first_seen = _cluster_first_seen_per_category(df, category_col, date_col)
+
+    # ---------------------------------------------------------
+    # Convert comma-separated gene lists into long format
+    # ---------------------------------------------------------
+    gene_records = []
+
+    for _, row in df.iterrows():
+        for gene_function in gene_function_cols:
+            gene_string = row[gene_function]
+
+            if pd.isna(gene_string):
+                continue
+            gene_string = str(gene_string).strip()
+            if not gene_string:
+                continue
+
+            genes = [g.strip() for g in gene_string.split(",") if g.strip()]
+
+            for gene in genes:
+                gene_records.append(
+                    {
+                        "Plasmid": row["Plasmid"],
+                        CLUSTER_COL: row[CLUSTER_COL],
+                        category_col: row[category_col],
+                        date_col: row[date_col],
+                        "gene": gene,
+                        "gene_function": gene_function,
+                    }
+                )
+
+    gene_df = pd.DataFrame(gene_records)
+
+    if gene_df.empty:
+        raise ValueError("No genes were detected in the functional gene columns.")
+
+    gene_df = gene_df.drop_duplicates(
+        subset=["Plasmid", CLUSTER_COL, category_col, "gene", "gene_function"]
     )
-    long_genes = (
-        long_genes.dropna(subset=["gene_list"])
-        .assign(gene=lambda x: x["gene_list"].str.split(","))
-        .explode("gene")
-    )
-    long_genes["gene"] = long_genes["gene"].str.strip()
 
-    target_genes = long_genes["gene"].unique()
+    cluster_sizes = df.groupby(CLUSTER_COL)["Plasmid"].nunique().rename("n_total")
 
-    # Step 2: plasmid × gene presence matrix
-    plasmid_metadata = df_in[["Plasmid", cluster_col, group_col]].drop_duplicates()
+    # ---------------------------------------------------------
+    # Analyze each cluster x functional category x gene
+    # ---------------------------------------------------------
+    results = []
+    category_results = []
 
-    plasmid_gene_matrix = long_genes.assign(present=1).pivot_table(
-        index="Plasmid",
-        columns="gene",
-        values="present",
-        aggfunc="max",
-        fill_value=0,
-    )
+    for (cluster, gene_function, gene), sub in gene_df.groupby(
+        [CLUSTER_COL, "gene_function", "gene"]
+    ):
+        n_present = sub["Plasmid"].nunique()
+        n_total = cluster_sizes.loc[cluster]
+        percent_present = n_present / n_total * 100
 
-    plasmid_gene_matrix = plasmid_gene_matrix.join(
-        plasmid_metadata.set_index("Plasmid")
-    )
+        category_counts = (
+            sub.groupby(category_col)["Plasmid"].nunique().sort_values(ascending=False)
+        )
+        n_categories_with_gene = len(category_counts)
+        categories_with_gene = list(category_counts.index)
 
-    # Precompute cluster-level compartment sets
-    cluster_all_compartments = (
-        plasmid_metadata.groupby(cluster_col)[group_col].apply(set).to_dict()
-    )
+        spillover = n_categories_with_gene > 1
+        category_restricted = (
+            n_categories_with_gene == 1 and n_present >= min_restricted_carriers
+        )
+        restricted_category = categories_with_gene[0] if category_restricted else None
 
-    # Step 3: cluster × compartment presence for each gene
-    cluster_compartment_dict = {}
-    cluster_gene_counts = {}
-
-    for gene in target_genes:
-        gene_df = plasmid_gene_matrix.loc[plasmid_gene_matrix[gene] == 1]
-
-        cluster_compartments = gene_df.groupby(cluster_col)[group_col].apply(set)
-
-        gene_counts = gene_df.groupby(cluster_col).size()
-
-        cluster_compartment_dict[gene] = cluster_compartments
-        cluster_gene_counts[gene] = gene_counts
-
-    # Step 4: compute spillover summaries
-    gene_spillover_summary = []
-    cluster_spillover_records = []
-
-    for gene, cluster_dict in cluster_compartment_dict.items():
-        n_clusters = len(cluster_dict)
-        n_multi_compartment = sum(len(comps) > 1 for comps in cluster_dict)
-        multi_origin_clusters_with_gene = [
-            cluster
-            for cluster in cluster_dict.keys()
-            if len(cluster_all_compartments.get(cluster, set())) > 1
-        ]
-        n_multi_origin_clusters_with_gene = len(multi_origin_clusters_with_gene)
-
-        # number of plasmids with this gene that belong to multi-origin clusters
-        n_plasmids_in_multi_origin_clusters = sum(
-            cluster_gene_counts[gene].get(cluster, 0)
-            for cluster in multi_origin_clusters_with_gene
+        # -------------------------------------------------
+        # Temporal summary
+        # -------------------------------------------------
+        sub_dated = sub.dropna(subset=[date_col])
+        category_first_seen = (
+            sub_dated.groupby(category_col)[date_col].min().sort_values()
         )
 
-        total_gene_count = plasmid_gene_matrix[gene].sum()
+        if not category_first_seen.empty:
+            first_seen_category = category_first_seen.index[0]
+            first_seen_date = category_first_seen.iloc[0]
+        else:
+            first_seen_category = None
+            first_seen_date = pd.NaT
 
-        gene_spillover_summary.append(
-            {
-                "gene": gene,
-                "n_clusters": n_clusters,
-                "n_clusters_with_gene_spillover": n_multi_compartment,
-                "n_multi_origin_clusters_with_gene": n_multi_origin_clusters_with_gene,
-                "spillover_fraction": (
-                    n_multi_compartment / n_clusters if n_clusters > 0 else 0.0
-                ),
-                "total_plasmids_with_gene": int(total_gene_count),
-                "n_plasmids_with_gene_in_multi_origin_clusters": int(
-                    n_plasmids_in_multi_origin_clusters
-                ),
-            }
-        )
+        novel_introduction_categories = []
+        novel_cluster_introduction = False
+        novel_gene_introduction = False
 
-        for cluster, gene_comps in cluster_dict.items():
-            cluster_spillover_records.append(
+        for cat in categories_with_gene:
+            cat_sub = sub[sub[category_col] == cat]
+            cat_sub_dated = sub_dated[sub_dated[category_col] == cat]
+            cat_first_date = (
+                cat_sub_dated[date_col].min() if not cat_sub_dated.empty else pd.NaT
+            )
+
+            n_prior = _count_prior_isolates(category_date_idx, cat, cat_first_date)
+            is_first = spillover and cat == first_seen_category
+
+            novel_appearance = bool(
+                spillover
+                and not is_first
+                and not pd.isna(n_prior)
+                and n_prior >= min_prior_isolates_for_novel
+            )
+
+            # Did the gene arrive together with the cluster's own
+            # first appearance in this category, or was the cluster
+            # already established there beforehand?
+            cluster_first_date = cluster_first_seen.get((cluster, cat), pd.NaT)
+            if pd.isna(cluster_first_date) or pd.isna(cat_first_date):
+                cooccurs_with_cluster = None
+                days_after_cluster_first_seen = None
+            else:
+                days_after_cluster_first_seen = (
+                    cat_first_date - cluster_first_date
+                ).days
+                cooccurs_with_cluster = (
+                    days_after_cluster_first_seen <= cluster_cooccurrence_window_days
+                )
+
+            if novel_appearance:
+                novel_introduction_categories.append(cat)
+                if cooccurs_with_cluster:
+                    novel_cluster_introduction = True
+                else:
+                    novel_gene_introduction = True
+
+            category_results.append(
                 {
+                    CLUSTER_COL: cluster,
+                    "gene_function": gene_function,
                     "gene": gene,
-                    "cluster": cluster,
-                    "gene_compartments": gene_comps,
-                    "cluster_all_compartments": cluster_all_compartments.get(
-                        cluster, set()
-                    ),
-                    "gene_count_in_cluster": int(
-                        cluster_gene_counts[gene].get(cluster, 0)
-                    ),
-                    "spillover": len(gene_comps) > 1,
+                    category_col: cat,
+                    "n_present": cat_sub["Plasmid"].nunique(),
+                    "first_date": cat_first_date,
+                    "n_prior_isolates_in_category": n_prior,
+                    "is_presumed_first_category": is_first,
+                    "novel_appearance": novel_appearance,
+                    "cluster_first_seen_in_category": cluster_first_date,
+                    "days_after_cluster_first_seen": days_after_cluster_first_seen,
+                    "gene_cooccurs_with_cluster_first_appearance": cooccurs_with_cluster,
                 }
             )
 
-    gene_spillover_summary = pd.DataFrame(gene_spillover_summary).sort_values(
-        "spillover_fraction", ascending=False
-    )
+        results.append(
+            {
+                CLUSTER_COL: cluster,
+                "gene_function": gene_function,
+                "gene": gene,
+                "n_present": n_present,
+                "n_total": n_total,
+                "percent_present": percent_present,
+                "n_categories_with_gene": n_categories_with_gene,
+                "categories_with_gene": categories_with_gene,
+                "spillover": spillover,
+                "category_restricted": category_restricted,
+                "restricted_category": restricted_category,
+                "first_seen_date": first_seen_date,
+                "first_seen_category": first_seen_category,
+                "n_novel_introductions": len(novel_introduction_categories),
+                "novel_introduction_categories": novel_introduction_categories,
+                "novel_cluster_introduction": novel_cluster_introduction,
+                "novel_gene_introduction": novel_gene_introduction,
+            }
+        )
 
-    plot.spillover_summary(gene_spillover_summary)
-    cluster_spillover = pd.DataFrame(cluster_spillover_records)
+    cluster_gene_df = pd.DataFrame(results)
+    cluster_gene_category_df = pd.DataFrame(category_results)
 
-    return gene_spillover_summary, cluster_spillover
+    if category_col == config.ORIGIN_COL:
+        main_figure = False
+    else:
+        main_figure = True
+
+    plot.spillover_summary(cluster_gene_df, main_figure)
+
+    return cluster_gene_df, cluster_gene_category_df
 
 
 # ---------------------------------------------------------
 # 3.1 Dataset Overview
 # ---------------------------------------------------------
-def dataset_overview(df_plasmids_in: pd.DataFrame, df_metadata_in: pd.DataFrame):
+def dataset_overview(df_plasmids_in: pd.DataFrame, df_isolates_in: pd.DataFrame):
     df_plasmids = df_plasmids_in.copy()
+    df_isolates = df_isolates_in.copy()
 
     out_path = "results/dataset_overview"
     os.makedirs(out_path, exist_ok=True)
@@ -1088,22 +2128,24 @@ def dataset_overview(df_plasmids_in: pd.DataFrame, df_metadata_in: pd.DataFrame)
     # 3.1.1 Simple counts
     # ---------------------------------------------------------
     # Iso count
-    n_isolates = df_plasmids[config.PARENT_COL].nunique()
-    n_people = df_plasmids[config.ID_COL].nunique()
+    n_isolates = df_isolates["KEY"].nunique()
+    n_people = df_isolates[config.ID_COL].nunique()
     n_plasmids = df_plasmids[config.PLASMID_COL].nunique()
+    n_isolates_with_plasmids = df_plasmids[config.ISOLATE_COL].nunique()
 
     # Temporal
-    start_date = df_plasmids[config.DATE_COL].min()
-    end_date = df_plasmids[config.DATE_COL].max()
+    start_date = df_isolates[config.DATE_COL].min()
+    end_date = df_isolates[config.DATE_COL].max()
 
     # Geo
-    n_cities = df_plasmids["city"].nunique()
-    n_municipalities = df_plasmids["municipality"].nunique()
-    n_provinces = df_plasmids["province"].nunique()
+    n_cities = df_isolates["city"].nunique()
+    n_municipalities = df_isolates["municipality"].nunique()
+    n_provinces = df_isolates["province"].nunique()
     with open(f"{out_path}/output.txt", "w") as f:
         f.write(f"n_isolates = {n_isolates}\n")
         f.write(f"n_patients = {n_people}\n")
         f.write(f"n_plasmids = {n_plasmids}\n")
+        f.write(f"n_isolates with plasmids = {n_isolates_with_plasmids}\n")
         f.write(f"\nIsolated between:\n")
         f.write(f"start_date = {start_date}\n")
         f.write(f"end_date = {end_date}\n")
@@ -1116,18 +2158,31 @@ def dataset_overview(df_plasmids_in: pd.DataFrame, df_metadata_in: pd.DataFrame)
     # 3.1.2 Data distribution
     # ---------------------------------------------------------
     # Epi origin
-    origin = count_column_composition(df_plasmids, "origin", False)
+    origin_iso = count_column_composition(df_isolates, "origin", False)
+    origin_pls = count_column_composition(df_plasmids, "origin", False)
+    origin = origin_iso.merge(
+        origin_pls, on="origin", suffixes=("_isolates", "_plasmids")
+    )
     origin.to_csv(f"{out_path}/origin_distribution.csv", sep=";")
 
     # Species origin
-    species = count_column_composition(df_plasmids, config.SPECIES_COL, False)
+    species_iso = count_column_composition(df_isolates, config.SPECIES_COL, False)
+    species_pls = count_column_composition(df_plasmids, config.SPECIES_COL, False)
+    species = species_iso.merge(
+        species_pls, on=config.SPECIES_COL, suffixes=("_isolates", "_plasmids")
+    )
     species.to_csv(f"{out_path}/species_distribution.csv", sep=";")
+
+    origin_sts = count_column_composition_by_cluster(
+        df_isolates, config.ST_COL, "origin"
+    )
+    origin_sts.to_csv(f"{out_path}/origin_st_composition.csv", sep=";")
 
     # ---------------------------------------------------------
     # 3.1.3 Plasmid carriage statistics
     # ---------------------------------------------------------
-    plasmid_carriage_counting(df_plasmids)
-    plot_population(df_plasmids)
+    plasmid_carriage_counting(df_plasmids, df_isolates)
+    plot_population(df_plasmids, df_isolates)
 
     # ---------------------------------------------------------
     # 3.1.4 Functional gene analysis
@@ -1148,15 +2203,51 @@ def dataset_overview(df_plasmids_in: pd.DataFrame, df_metadata_in: pd.DataFrame)
         col_presence.to_csv(f"{out_path}/{col}_presence_distribution.csv", sep=";")
         colgenes = count_column_composition(df_plasmids, f"{col}", True)
         colgenes.to_csv(f"{out_path}/{col}_gene_distribution.csv", sep=";")
+        df_plasmids[f"{col}_count"].describe().to_csv(
+            f"results/dataset_overview/{col}_carriage_rates.csv", sep=";"
+        )
+        df_plasmids.groupby(f"{col}_plasmid")[f"{col}_count"].describe().to_csv(
+            f"results/dataset_overview/{col}_only_carriage_rates.csv", sep=";"
+        )
 
-    gene_statics = gene_origin_enrichment(df_plasmids)
-    gene_statics.to_csv(f"results/tables/tableS3_gene_distribution.csv", sep=";")
+    # gene_statics = gene_origin_enrichment(df_plasmids)
+    # gene_statics.to_csv(f"results/dataset_overview/gene_distribution_full.csv", sep=";")
+    # primary_cols = [
+    #     "gene",
+    #     "p_chi2_adj",
+    #     "p_chi2_perm_adj",
+    #     "cramers_v",
+    #     "resid_pos_CA-MRSA",
+    #     "resid_pos_HA-MRSA",
+    #     "resid_pos_LA-MRSA",
+    #     "resid_pos_MSSA",
+    #     "resid_pos_Sar",
+    # ]
+
+    # supplementary_df = gene_statics[primary_cols]
+    # supplementary_df.to_csv(f"results/tables/tableS4_gene_distribution.csv", sep=";", index=False)
+
+    tables = []
+    for col in gene_columns:
+        table = count_column_composition_by_cluster(
+            df_in=df_plasmids,
+            column_col=col,
+            row_col="origin",
+            split=True,
+        )
+        table["variable"] = col
+        tables.append(table)
+
+    result = pd.concat(tables)
+    result.to_csv(f"{out_path}/origin_gene_counts.csv", sep=";")
+    result = pd.read_csv(f"{out_path}/origin_gene_counts.csv", sep=";")
+    plot.gene_heatmap(result, "origin")
 
 
 # ---------------------------------------------------------
 # 3.2 Plasmid Cluster Composition
 # ---------------------------------------------------------
-def cluster_overview(df_in: pd.DataFrame):
+def cluster_overview(df_in: pd.DataFrame, metadata_df: pd.DataFrame):
     df = df_in.copy()
     out_path = "results/cluster_composition"
     os.makedirs(out_path, exist_ok=True)
@@ -1176,30 +2267,99 @@ def cluster_overview(df_in: pd.DataFrame):
     )
     clustered = count_column_composition(df, "clustered", False)
     clustered.to_csv(f"{out_path}/clustered_rate.csv", sep=";")
-    clustered = count_column_composition(df, "clustered", False)
-    clustered.to_csv(f"{out_path}/clustered_rate.csv", sep=";")
 
     df_clustered = df.loc[df["clustered"] == "Clustered"]
-    sizes = df_clustered.groupby("group").size()
+    sizes = df_clustered.groupby(cluster_col).size()
 
+    # Determine significant/common STs based on the number of isolates
+    isolate_st_counts = metadata_df[config.ST_COL].value_counts()
+    common_STs = isolate_st_counts[isolate_st_counts >= 25].index
+    df_clustered["ST_collapsed"] = df_clustered["ISOLATE_TL_MLST_ST"].where(
+        df_clustered["ISOLATE_TL_MLST_ST"].isin(common_STs),
+        "rare_ST",
+    )
+    print(df_clustered["ST_collapsed"].unique())
     q1 = sizes.quantile(0.25)
+    q2 = sizes.median()
     q3 = sizes.quantile(0.75)
     with open(f"{out_path}/cluster_stats.txt", "w") as f:
-        f.write(f"Number of groups: {sizes.size}\n")
-        f.write(f"Mean group size:  {sizes.mean():.2f}\n")
-        f.write(f"Q1:               {q1:.2f}\n")
-        f.write(f"Q3:               {q3:.2f}\n")
-        f.write(f"IQR:              {q3 - q1:.2f}\n")
-        f.write(f"Std:              {sizes.std():.2f}\n")
-        f.write(f"Min:              {sizes.min()}\n")
-        f.write(f"Max:              {sizes.max()}\n")
+        f.write(f"Number of clusters:   {sizes.size}\n")
+        f.write(f"Mean cluster size:    {sizes.mean():.2f}\n")
+        f.write(f"Q1:                   {q1:.2f}\n")
+        f.write(f"Median:               {q2:.2f}\n")
+        f.write(f"Q3:                   {q3:.2f}\n")
+        f.write(f"IQR:                  {q3 - q1:.2f}\n")
+        f.write(f"Std:                  {sizes.std():.2f}\n")
+        f.write(f"Min:                  {sizes.min()}\n")
+        f.write(f"Max:                  {sizes.max()}\n")
         f.write("\n")
+
+        # Number of unique categorical values per cluster
+        categorical_cols = ["origin", config.ST_COL, "ST_collapsed"]
+        for col in categorical_cols:
+            counts = df_clustered.groupby(cluster_col)[col].nunique()
+
+            q1 = counts.quantile(0.25)
+            q2 = counts.median()
+            q3 = counts.quantile(0.75)
+
+            f.write(f"Number of unique {col} values per cluster:\n")
+            f.write(f"  Mean:    {counts.mean():.2f}\n")
+            f.write(f"  Q1:      {q1:.2f}\n")
+            f.write(f"  Median:  {q2:.2f}\n")
+            f.write(f"  Q3:      {q3:.2f}\n")
+            f.write(f"  IQR:     {q3 - q1:.2f}\n")
+            f.write(f"  Std:     {counts.std():.2f}\n")
+            f.write(f"  Min:     {counts.min()}\n")
+            f.write(f"  Max:     {counts.max()}\n")
+            f.write("\n")
 
     plot.tsne_by_cluster(df)
 
     # ---------------------------------------------------------
     # 3.2.2 Clustering compositions
     # ---------------------------------------------------------
+    clusters_per_species = df_clustered.groupby("origin")[cluster_col].nunique()
+    clusters_per_STs = df_clustered.groupby(config.ST_COL)[cluster_col].nunique()
+    clusters_per_ST_collapsed = df_clustered.groupby("ST_collapsed")[
+        cluster_col
+    ].nunique()
+
+    q1 = clusters_per_STs.quantile(0.25)
+    q2 = clusters_per_STs.median()
+    q3 = clusters_per_STs.quantile(0.75)
+
+    q1_col = clusters_per_ST_collapsed.quantile(0.25)
+    q2_col = clusters_per_ST_collapsed.median()
+    q3_col = clusters_per_ST_collapsed.quantile(0.75)
+    with open(f"{out_path}/column_cluster_stats.txt", "w") as f:
+        f.write("Number of clusters per species:\n")
+        for species, count in clusters_per_species.items():
+            f.write(f"{species}: {count}\n")
+
+        # Species -> number of clusters
+        f.write("\nNumber of clusters per ST:\n")
+        f.write(f"Number of STs:         {clusters_per_STs.size}\n")
+        f.write(f"Mean:                  {clusters_per_STs.mean():.2f}\n")
+        f.write(f"Q1:                    {q1:.2f}\n")
+        f.write(f"Median:                {q2:.2f}\n")
+        f.write(f"Q3:                    {q3:.2f}\n")
+        f.write(f"IQR:                   {q3 - q1:.2f}\n")
+        f.write(f"Std:                   {clusters_per_STs.std():.2f}\n")
+        f.write(f"Min:                   {clusters_per_STs.min()}\n")
+        f.write(f"Max:                   {clusters_per_STs.max()}\n")
+
+        f.write("\nNumber of clusters per common ST:\n")
+        f.write(f"Number of STs:         {clusters_per_ST_collapsed.size}\n")
+        f.write(f"Mean:                  {clusters_per_ST_collapsed.mean():.2f}\n")
+        f.write(f"Q1:                    {q1_col:.2f}\n")
+        f.write(f"Median:                {q2_col}\n")
+        f.write(f"Q3:                    {q3_col}\n")
+        f.write(f"IQR:                   {q3_col - q1_col:.2f}\n")
+        f.write(f"Std:                   {clusters_per_ST_collapsed.std():.2f}\n")
+        f.write(f"Min:                   {clusters_per_ST_collapsed.min()}\n")
+        f.write(f"Max:                   {clusters_per_ST_collapsed.max()}\n")
+
     for col in ["origin", "replicon", "mobility", "AMR_plasmid"]:
         table = count_column_composition_by_cluster(
             df_in=df,
@@ -1210,17 +2370,13 @@ def cluster_overview(df_in: pd.DataFrame):
 
     plot.composition_by_cluster(df)
 
-    # ---------------------------------------------------------
-    # 3.2.3 Plasmidome differences
-    # ---------------------------------------------------------
-    composition_dict = compartment_plasmidome_dispersion(df_clustered)
-    with open(f"{out_path}/cluster_stats.txt", "a") as f:
-        f.write(f"Cluster composition output:\n")
-        f.write(f"global_permanova:    {composition_dict['global_permanova']}\n")
-        f.write(f"pairwise_permanova:  {composition_dict['pairwise_permanova']}\n")
-        f.write(f"dispersion_summary:  {composition_dict['dispersion_summary']}\n")
-        f.write(f"dispersion_pairwise: {composition_dict['dispersion_pairwise']}\n")
-        f.write("\n")
+    # # ---------------------------------------------------------
+    # # 3.2.3 Plasmidome differences
+    # # ---------------------------------------------------------
+    # composition_dict = compartment_plasmidome_dispersion(df_clustered)
+    # tables = save_plasmidome_tables(
+    #     composition_dict,
+    # )
 
     # ---------------------------------------------------------
     # 3.2.4 Cluster functional gene composition
@@ -1229,26 +2385,42 @@ def cluster_overview(df_in: pd.DataFrame):
 
     for col in gene_columns:
         table = count_column_composition_by_cluster(
-            df_in=df,
+            df_in=df_clustered,
             column_col=col,
             split=True,
         )
-
         table["variable"] = col
         tables.append(table)
 
     result = pd.concat(tables)
-    result.to_csv(f"{out_path}/cluster_counts.csv", sep=";")
+    result.to_csv(f"{out_path}/cluster_gene_counts.csv", sep=";")
+    result = pd.read_csv(f"{out_path}/cluster_gene_counts.csv", sep=";")
     plot.gene_heatmap(result, cluster_col)
 
     # ---------------------------------------------------------
     # 3.2.5 Cluster functional gene spillover
     # ---------------------------------------------------------
-    gene_spillover_summary, cluster_spillover = gene_spillover_analysis(
-        df_clustered, cluster_col
+    metadata_df["Parent"] = metadata_df["KEY"]
+    metadata_df = metadata_df.set_index("Parent")
+    cluster_gene_df, gene_spillover_summary = analyze_cluster_gene_spillover(
+        df_clustered, metadata_df, config.ORIGIN_COL, date_col=config.DATE_COL
     )
-    gene_spillover_summary.to_csv(f"{out_path}/gene_spillover.csv", sep=";")
-    cluster_spillover.to_csv(f"{out_path}/cluster_spillover.csv", sep=";")
+    cluster_gene_df.to_csv(
+        f"{out_path}/gene_spillover_origin_summary.csv", sep=";", index=False
+    )
+    gene_spillover_summary.to_csv(
+        f"{out_path}/gene_spillover_origin.csv", sep=";", index=False
+    )
+
+    cluster_gene_df, gene_spillover_summary = analyze_cluster_gene_spillover(
+        df_clustered, metadata_df, config.ST_COL, date_col=config.DATE_COL
+    )
+    cluster_gene_df.to_csv(
+        f"{out_path}/gene_spillover_ST_summary.csv", sep=";", index=False
+    )
+    gene_spillover_summary.to_csv(
+        f"{out_path}/gene_spillover_ST.csv", sep=";", index=False
+    )
 
 
 if __name__ == "__main__":

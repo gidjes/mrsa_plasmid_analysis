@@ -16,8 +16,8 @@ ORIGIN_COL = "origin"
 
 ## Genome cols
 CLUSTER_COL = "Standard_Cluster_mrsa"
-TSNE1D = "tsne_1D_mrsa"
-TSNE2D = "tsne_2D_mrsa"
+TSNE1D = "tsne1D_mrsa"
+TSNE2D = "tsne2D_mrsa"
 MOBILITY_COL = "mobility"
 REPLICON_COL = "replicon"
 AMR_COL = "amr"
@@ -26,7 +26,7 @@ METAL_COL = "metal"
 BIOCIDE_COL = "biocide"
 
 ## Epi cols
-DATE_COL = "MATERIAL_SAMPLING_DATE"
+DATE_COL = "MATERIAL_SAMPLINGDATE"
 PROVINCE_COL = "MATERIAL_SUBMITTER_PROVINCE"
 PROVINCE_COL_BACKUP = "PERSON_PROVINCE"
 CITY_COL = "MATERIAL_SUBMITTER_CITY"

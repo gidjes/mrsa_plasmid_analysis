@@ -75,6 +75,16 @@ def attach_municipalities(df_in):
         how="left",
     )
 
+    # Show cities that did not get a municipality
+    unmatched = (
+        df.loc[df["municipality"].isna(), ["city", "province"]]
+        .drop_duplicates()
+        .sort_values(["province", "city"])
+    )
+
+    print(f"{len(unmatched)} unique city/province combinations did not match:")
+    print(unmatched.to_string(index=False))
+
     return df
 
 
@@ -88,7 +98,9 @@ def infer_region(row):
 
 
 def clean_plasmid_df(
-    df_meta: pd.DataFrame, df_clustering: pd.DataFrame
+    df_meta: pd.DataFrame,
+    df_clustering: pd.DataFrame,
+    plasmid_level: bool = True,
 ) -> pd.DataFrame:
     """
     Funtion to clean up and fill up the MRSA plasmid data file
@@ -99,38 +111,25 @@ def clean_plasmid_df(
         DF with plasmid genomic and epi data
     df_clustering : pd.DataFrame
         DF with MRSA assigned clusters
+    plasmid_level : bool
+        Is the input DF at the plasmid level, by default True
 
     Returns
     -------
     pd.DataFrame
         DF with genomic, epi, and cluster data
     """
-    # Clean the small linear pieces
-    df_thresh = df_meta.loc[df_meta["length"] >= 1000].copy()
-
-    # Add AMR_status and gene counts
-    df_thresh.loc[:, "amr_status"] = df_thresh["amr"].notna().astype(int)
-    df_thresh.loc[:, "amr_count"] = df_thresh["amr"].apply(
-        lambda x: 0 if pd.isna(x) else len(x.split(","))
-    )
-    df_thresh.loc[:, "vir_count"] = df_thresh["virulence"].apply(
-        lambda x: 0 if pd.isna(x) else len(x.split(","))
-    )
-    df_thresh.loc[:, "metal_count"] = df_thresh["metal"].apply(
-        lambda x: 0 if pd.isna(x) else len(x.split(","))
-    )
-    df_thresh.loc[:, "biocide_count"] = df_thresh["biocide"].apply(
-        lambda x: 0 if pd.isna(x) else len(x.split(","))
-    )
-
-    df_thresh[DATE_COL] = pd.to_datetime(
-        df_thresh[DATE_COL],
+    df_meta[DATE_COL] = pd.to_datetime(
+        df_meta[DATE_COL],
         dayfirst=True,
         errors="coerce",  # converts invalid/empty values to NaT
     )
+    df_meta[ST_COL] = [
+        str(int(float(x))) if pd.notna(x) else x for x in df_meta[ST_COL]
+    ]
 
     # Fix the MRSA type column; origin
-    df_origin_fixed = infer_origin(df_thresh)
+    df_origin_fixed = infer_origin(df_meta)
 
     # Fill empty region values (GPs) and create municipality
     df_origin_fixed[["city", "province"]] = df_origin_fixed.apply(
@@ -138,14 +137,39 @@ def clean_plasmid_df(
     )
     df_geo_loc_fixed = attach_municipalities(df_origin_fixed)
 
-    # Add the MRSA mge-clusters
-    df_clustering = df_clustering.add_suffix("_mrsa")
-    df_clustering = df_clustering.rename(columns={"Sample_Name_mrsa": "Plasmid"})
-    merged_df = df_geo_loc_fixed.merge(
-        df_clustering, left_on="Plasmid", right_on="Plasmid"
-    )
+    if plasmid_level:
+        # Clean the small linear pieces
+        df_thresh = df_geo_loc_fixed.loc[df_geo_loc_fixed["bp_length"] >= 1000].copy()
 
-    return merged_df
+        # Add AMR_status and gene counts
+        df_thresh.loc[:, "amr_plasmid"] = df_thresh["amr"].notna().astype(int)
+        df_thresh.loc[:, "amr_count"] = df_thresh["amr"].apply(
+            lambda x: 0 if pd.isna(x) else len(x.split(","))
+        )
+        df_thresh.loc[:, "virulence_plasmid"] = (
+            df_thresh["virulence"].notna().astype(int)
+        )
+        df_thresh.loc[:, "virulence_count"] = df_thresh["virulence"].apply(
+            lambda x: 0 if pd.isna(x) else len(x.split(","))
+        )
+        df_thresh.loc[:, "metal_plasmid"] = df_thresh["metal"].notna().astype(int)
+        df_thresh.loc[:, "metal_count"] = df_thresh["metal"].apply(
+            lambda x: 0 if pd.isna(x) else len(x.split(","))
+        )
+        df_thresh.loc[:, "biocide_plasmid"] = df_thresh["biocide"].notna().astype(int)
+        df_thresh.loc[:, "biocide_count"] = df_thresh["biocide"].apply(
+            lambda x: 0 if pd.isna(x) else len(x.split(","))
+        )
+
+        # Add the MRSA mge-clusters
+        df_clustering = df_clustering.add_suffix("_mrsa")
+        df_clustering = df_clustering.rename(columns={"Sample_Name_mrsa": "Plasmid"})
+        print(df_clustering)
+        df_geo_loc_fixed = df_thresh.merge(
+            df_clustering, left_on="Plasmid", right_on="Plasmid"
+        )
+
+    return df_geo_loc_fixed
 
 
 def lsf_hpcify_cmd(

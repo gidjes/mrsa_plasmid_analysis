@@ -33,7 +33,7 @@ def create_input_file():
     fastas_dir = os.listdir("fastas")
     fastas = [x for x in fastas_dir if x.endswith(".fasta")]
     fastas = [f"fastas/{x}" for x in fastas]
-    with open("mge_bootstrap/mge_input.txt", "w") as f:
+    with open("output/mge_bootstrap/mge_input.txt", "w") as f:
         for fasta in fastas:
             f.write(f"{fasta}" + "\n")
 
@@ -63,18 +63,18 @@ def generate_mge_cmd(
     """
 
     mge_cmd_base = (
-        "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 12"
+        "mge_cluster --create --input output/mge_bootstrap/mge_input.txt --threads 12"
     )
 
     # Set parameter, values and create directories
     if boot_param == "perplexity":
         param = f"--perplexity {boot_value}"
         sub_name = "perplex"
-        outdir = f"mge_bootstrap/{boot_param}/{sub_name}_{boot_value}/"
+        outdir = f"output/mge_bootstrap/{boot_param}/{sub_name}_{boot_value}/"
     elif boot_param == "clustersize":
         param = f"--min_cluster {boot_value}"
         sub_name = "cs"
-        outdir = f"mge_bootstrap/{boot_param}/{sub_name}_{boot_value}/"
+        outdir = f"output/mge_bootstrap/{boot_param}/{sub_name}_{boot_value}/"
     else:
         print("Incorrect parameter chosen for bootstrap.")
         print("Currently available: perplexity or clustersize")
@@ -211,11 +211,11 @@ def bootstrap_rand(
         parameter value with highest mean rand index value
     """
     # Open clustering files and concat to single df
-    boots = os.listdir(parameter)
+    boots = os.listdir(f"output/mge_bootstrap/{parameter}")
     file_paths = [
-        f"mge_bootstrap/{parameter}/{x}/mge-cluster_results.csv" for x in boots
+        f"output/mge_bootstrap/{parameter}/{x}/mge-cluster_results.csv" for x in boots
     ]
-    dfs = [open_and_mark(x, x.split("/")[1].split("_")[-1]) for x in file_paths]
+    dfs = [open_and_mark(x, x.split("/")[2].split("_")[-1]) for x in file_paths]
     df = pd.concat(dfs, axis=1)
 
     # Create empty df to store the ARI values
@@ -255,9 +255,9 @@ def bootstrap_rand(
     ).set(title=f"{parameter}")
 
     # Save data files
-    plt.savefig(f"mge_bootstrap/{parameter}_ARI.png")
+    plt.savefig(f"output/mge_bootstrap/{parameter}_ARI.png")
     plt.clf()
-    ari_matrix.to_csv(f"mge_bootstrap/{parameter}_ARI.csv", sep=";")
+    ari_matrix.to_csv(f"output/mge_bootstrap/{parameter}_ARI.csv", sep=";")
 
     # Return the parameter value to use
     return best_parameter
@@ -279,14 +279,14 @@ def optimised_mge(perplexity: int, clustersize: int):
         cluster size value to use
     """
     # Base command string
-    base = "mge_cluster --create --input mge_bootstrap/mge_input.txt --threads 12 --outdir mge_bootstrap/final_model"
+    base = "mge_cluster --create --input output/mge_bootstrap/mge_input.txt --threads 12 --outdir output/mge_bootstrap/final_model"
 
     # Set optimised parameter values
     params = f"--min_cluster {clustersize} --perplexity {perplexity}"
 
     # Create directory
-    if not os.path.exists("mge_bootstrap/final_model/"):
-        os.makedirs("mge_bootstrap/final_model")
+    if not os.path.exists("output/mge_bootstrap/final_model/"):
+        os.makedirs("output/mge_bootstrap/final_model")
 
     # Combine command string
     cmd = f"{base} {params}"
