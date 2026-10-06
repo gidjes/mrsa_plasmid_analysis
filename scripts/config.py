@@ -52,3 +52,21 @@ ORIGIN_PALETTE_FULL = {
     r"Sensitive $\it{S. aureus}$": "#737070",
     r"$\it{S. argenteus}$": "#C6C83A",
 }
+ORIGIN_PALETTE_SHORT = {
+    "LA-MRSA": "#1baa62",
+    "HA-MRSA": "#d52b1e",
+    "CA-MRSA": "#007bc7",
+    "MSSA": "#737070",
+    "Sar": "#C6C83A",
+}
+
+MOBILITY_PALETTE = {
+    "non-mobilizable": "#F1AD41",
+    "mobilizable": "#D258EB",
+    "conjugative": "#2BC985",
+}
+CLONALITY_PALETTE = {
+    "Clonal": "#11D027",
+    "Same genogroup": "#1BBFC2",
+    "Distant lineages": "#A90C84",
+}

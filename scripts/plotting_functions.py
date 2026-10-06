@@ -136,7 +136,7 @@ def custom_hierarchical_palette(colors, df, category_col, subcategory_col):
 def generate_colour_dict(
     df: pd.DataFrame,
     cat_col: str,
-    color_list: list,
+    color_list: list | dict,
     id_col: str = "Plasmid",
     subcat_col: str = None,
     use_hierarchical_palette: bool = False,
@@ -145,34 +145,96 @@ def generate_colour_dict(
     Generates color dictionaries for categories and IDs.
 
     Parameters:
-        df (pd.DataFrame): The input DataFrame.
-        cat_col (str): The main category column.
-        color_list (list): List of base colors.
-        id_col (str): Column containing unique IDs (e.g., sample or data point ID).
-        subcat_col (str): Optional subcategory column for hierarchical coloring.
-        use_hierarchical_palette (bool): Whether to use a hierarchical color palette.
+        df (pd.DataFrame):
+            The input DataFrame.
+
+        cat_col (str):
+            The main category column.
+
+        color_list (list | dict):
+            Either:
+            - a list of colours, which are assigned sequentially; or
+            - a dictionary mapping category names to colours.
+
+        id_col (str):
+            Column containing unique IDs (e.g., sample or data point ID).
+
+        subcat_col (str, optional):
+            Optional subcategory column for hierarchical coloring.
+
+        use_hierarchical_palette (bool):
+            Whether to use a hierarchical color palette.
 
     Returns:
-        id_color_dict (dict): {id: color}
-        category_color_dict (dict): {category_or_subcategory: color}
+        id_color_dict (dict):
+            {id: color}
+
+        category_color_dict (dict):
+            {category_or_subcategory: color}
     """
+
+    # ------------------------------------------------------------------
+    # Hierarchical palette
+    # ------------------------------------------------------------------
     if use_hierarchical_palette and subcat_col:
-        # Use hierarchical palette function
-        category_color_dict = custom_hierarchical_palette(
-            color_list, df, category_col=cat_col, subcategory_col=subcat_col
-        )
+        if isinstance(color_list, dict):
+            # Named colours: use the supplied colours directly
+            category_color_dict = {
+                subcat: color_list[subcat]
+                for subcat in df[subcat_col].dropna().unique()
+            }
+        else:
+            # Existing behaviour
+            category_color_dict = custom_hierarchical_palette(
+                color_list,
+                df,
+                category_col=cat_col,
+                subcategory_col=subcat_col,
+            )
+
         id_color_dict = {
-            row[id_col]: category_color_dict[row[subcat_col]]
+            row[id_col]: (
+                category_color_dict[row[subcat_col]]
+                if pd.notna(row[subcat_col])
+                else "lightgrey"
+            )
             for _, row in df.iterrows()
         }
+
+    # ------------------------------------------------------------------
+    # Flat palette
+    # ------------------------------------------------------------------
     else:
-        # Flat color assignment by main category
-        categories = sorted(df[cat_col].unique())
-        category_color_dict = {
-            cat: color_list[i % len(color_list)] for i, cat in enumerate(categories)
-        }
+        categories = sorted(df[cat_col].dropna().unique())
+
+        if isinstance(color_list, dict):
+            # Named palette
+            missing_categories = set(categories) - set(color_list)
+
+            if missing_categories:
+                raise ValueError(
+                    f"No colour defined for categories: "
+                    f"{sorted(missing_categories)}"
+                )
+
+            category_color_dict = {cat: color_list[cat] for cat in categories}
+
+        else:
+            # Existing sequential palette behaviour
+            if not color_list:
+                raise ValueError("color_list cannot be empty.")
+
+            category_color_dict = {
+                cat: color_list[i % len(color_list)] for i, cat in enumerate(categories)
+            }
+
         id_color_dict = {
-            row[id_col]: category_color_dict[row[cat_col]] for _, row in df.iterrows()
+            row[id_col]: (
+                category_color_dict[row[cat_col]]
+                if pd.notna(row[cat_col])
+                else "lightgrey"
+            )
+            for _, row in df.iterrows()
         }
 
     return id_color_dict, category_color_dict
@@ -708,13 +770,6 @@ def gene_heatmap(result: pd.DataFrame, x_col: str):
         colorbar_label = "Count"
         xlabel = "Origin"
         outpath = "results/figures/figureS1_gene_count_origin.png"
-
-    elif x_col == CLUSTER_COL:
-        rstring = r"\(([\d.]+)%\)"
-        annotate = False
-        colorbar_label = "Percentage"
-        xlabel = "Cluster"
-        outpath = "results/figures/figure_Sunknown_gene_counts_cluster.png"
 
     else:
         raise ValueError(f"Unsupported x_col: {x_col}")
@@ -1511,9 +1566,10 @@ def composition_by_cluster(
 
 
 def plot_tanglegram_full(
+    path_to_tree1: str,
+    path_to_tree2: str,
     df_in: pd.DataFrame,
     ax: Axes,
-    cluster: str | int,
     node_left: str,
     node_right: str,
     tangles: str,
@@ -1562,76 +1618,61 @@ def plot_tanglegram_full(
     df.fillna({node_right: "Unknown"}, inplace=True)
 
     # Define colourschemes
-    preset_colours = [
-        "#a90061",
-        "#275937",
-        "#007bc7",
-        "#f9e11e",
-        "#d52b1e",
-        "#777b00",
-        "#76d2b6",
-        "#673327",
-        "#552c6f",
-        "#f092cd",
-        "#154273",
-        "#94710a",
-        "#7c796f",
-        "#1baa62",
-    ]
     colors = [
-        "#FF0000",  # Red
-        "#00FF00",  # Lime
-        "#0000FF",  # Blue
-        "#FFFF00",  # Yellow
-        "#FFA500",  # Orange
-        "#800080",  # Purple
-        "#00FFFF",  # Cyan
-        "#FFC0CB",  # Pink
-        "#A52A2A",  # Brown
-        "#808080",  # Gray
-        "#000000",  # Black
-        "#FFFFFF",  # White
-        "#008000",  # Green
-        "#800000",  # Maroon
-        "#008080",  # Teal
-        "#000080",  # Navy
-        "#FFD700",  # Gold
-        "#4B0082",  # Indigo
-        "#7FFF00",  # Chartreuse
-        "#DC143C",  # Crimson
-        "#00CED1",  # DarkTurquoise
-        "#FF1493",  # DeepPink
         "#1E90FF",  # DodgerBlue
-        "#B22222",  # FireBrick
-        "#228B22",  # ForestGreen
-        "#DAA520",  # GoldenRod
-        "#ADFF2F",  # GreenYellow
+        "#FFD700",  # Gold
+        "#800080",  # Purple
         "#F08080",  # LightCoral
-        "#90EE90",  # LightGreen
+        "#000000",  # Black
         "#20B2AA",  # LightSeaGreen
-        "#87CEFA",  # LightSkyBlue
-    ]
-    outbreak_colours = ["#00CED1", "#C0C0C0", "#800080", "#F08080", "#ADFF2F"]
-    species_colours = ["seagreen", "gold"]
-    outline_colours = [
-        "firebrick",
-        "goldenrod",
-        "darkcyan",
-    ]
-    left_colours = [
-        "#C0C0C0",
-        "#007bc7",
+        "#DC143C",  # Crimson
         "#154273",
+        "#ADFF2F",  # GreenYellow
+        "#FFA500",  # Orange
+        "#007bc7",
+        "#800000",  # Maroon
+        "#90EE90",  # LightGreen
+        "#4B0082",  # Indigo
+        "#00CED1",  # DarkTurquoise
+        "#275937",
+        "#FF1493",  # DeepPink
+        "#673327",
+        "#0000FF",  # Blue
+        "#552c6f",
+        "#7FFF00",  # Chartreuse
+        "#008000",  # Green
+        "#f092cd",
+        "#000080",  # Navy
+        "#A52A2A",  # Brown
+        "#76d2b6",
+        "#00FF00",  # Lime
+        "#94710a",
+        "#B22222",  # FireBrick
         "#a90061",
+        "#7c796f",
+        "#FFFF00",  # Yellow
+        "#1baa62",
+        "#FFC0CB",  # Pink
+        "#00FFFF",  # Cyan
+        "#777b00",
+        "#87CEFA",  # LightSkyBlue
+        "#d52b1e",
+        # "#808080",  # Gray
+        "#DAA520",  # GoldenRod
+        "#008080",  # Teal
     ]
-    df["Parent"] = df["Parent"].astype(str)
 
+    tangle_colours = config.CLONALITY_PALETTE
+    df["Parent"] = df["Parent"].astype(str)
     # Generate the dictionary containing the colours for each point
     if palette == "":
+        colours_bin = colors
+        list_index = (len(df[node_left].unique()) - 1) % 40
+        colours_bin[list_index] = "#C2C2C2"
         tree1_colour_dict, tree1_legend = generate_colour_dict(
             df,
             node_left,
-            left_colours,
+            colors,
             "Plasmid",
         )
         tree2_colour_dict, tree2_legend = generate_colour_dict(
@@ -1649,14 +1690,14 @@ def plot_tanglegram_full(
         tree1_outline_dict, tree1_outline_legend = generate_colour_dict(
             df,
             outline_left,
-            colors,
+            config.MOBILITY_PALETTE,
             "Plasmid",
         )
 
         tree2_outline_dict, tree2_outline_legend = generate_colour_dict(
             df,
             outline_right,
-            outline_colours,
+            config.ORIGIN_PALETTE_SHORT,
             "Parent",
         )
     elif outline and palette != "":
@@ -1692,13 +1733,10 @@ def plot_tanglegram_full(
         tangle_legend = None
     else:
         tangle_colour_dict, tangle_legend = generate_colour_dict(
-            df, tangles, outbreak_colours
+            df, tangles, tangle_colours
         )
 
     # Load trees
-    path_to_tree1 = f"mashtree/{cluster}_tree.dnd"
-    path_to_tree2 = f"mashtree/{cluster}_chr_tree.dnd"
-
     tree1 = bt.loadNewick(path_to_tree1, absoluteTime=False)
     tree2 = bt.loadNewick(path_to_tree2, absoluteTime=False)
 
@@ -1782,6 +1820,7 @@ def plot_tanglegram_full(
         outline_colour=lambda k: (
             tree2_outline_dict[k.name] if k.name in tree2_outline_dict else "black"
         ),
+        linewidth=3,
         zorder=100,
     )
 
@@ -1789,10 +1828,12 @@ def plot_tanglegram_full(
     # Build lookup of outlier isolates
     if outlier_only:
         outlier_names = set(
-            df.loc[df["is_outlier"], "plasmid"]  # or whatever key matches k.name
+            df.loc[
+                df[node_left] != "unbinned", "Plasmid"
+            ]  # or whatever key matches k.name
         )
     else:
-        outlier_names = set(df["plasmid"])
+        outlier_names = set(df["Plasmid"])
 
     for k in filter(lambda x: x.branchType == "leaf", tree1.Objects):
         if k.name not in outlier_names:
@@ -1838,7 +1879,7 @@ def plot_tanglegram_full(
             title=f"Node colour\n{node_left}",
             numpoints=1,
             loc="upper left",
-            bbox_to_anchor=(-0.08, 1),
+            bbox_to_anchor=(-0.08, 1.02),
         )
         ax.add_artist(legend1)
 
@@ -1854,52 +1895,52 @@ def plot_tanglegram_full(
             title=f"Node colour\n{node_right}",
             numpoints=1,
             loc="upper right",
-            bbox_to_anchor=(1.08, 1.04),
+            bbox_to_anchor=(1.08, 1.02),
             # borderaxespad=3,
         )
         ax.add_artist(legend2)
 
-    if outline:
-        # Get bounding box of first legend (in display coords)
-        bbox = legend1.get_window_extent()
-        bbox_axes = bbox.transformed(ax.transAxes.inverted())
-        y_bottom = bbox_axes.y0
-        spacing = 0.01
+        if outline:
+            # Get bounding box of first legend (in display coords)
+            bbox = legend1.get_window_extent()
+            bbox_axes = bbox.transformed(ax.transAxes.inverted())
+            y_bottom = bbox_axes.y0
+            spacing = 0.01
 
-        markers = [
-            plt.Line2D([0, 0], [0, 0], color=color, marker="o", linestyle="")
-            for color in tree1_outline_legend.values()
-        ]
-        labels = ["\n".join(wrap(l, 15)) for l in tree1_outline_legend.keys()]
-        legend1b = ax.legend(
-            markers,
-            labels,
-            title=f"Outline colour\n{outline_left}",
-            numpoints=1,
-            loc="upper left",
-            bbox_to_anchor=(-0.08, y_bottom - spacing),  # same x as legend1
-        )
-        ax.add_artist(legend1b)
+            markers = [
+                plt.Line2D([0, 0], [0, 0], color=color, marker="o", linestyle="")
+                for color in tree1_outline_legend.values()
+            ]
+            labels = ["\n".join(wrap(l, 15)) for l in tree1_outline_legend.keys()]
+            legend1b = ax.legend(
+                markers,
+                labels,
+                title=f"Outline colour\n{outline_left}",
+                numpoints=1,
+                loc="upper left",
+                bbox_to_anchor=(-0.08, y_bottom - spacing),  # same x as legend1
+            )
+            ax.add_artist(legend1b)
 
-        # Get bounding box of first legend (in display coords)
-        bbox = legend2.get_window_extent()
-        bbox_axes = bbox.transformed(ax.transAxes.inverted())
-        y_bottom = bbox_axes.y0
-        spacing = 0.01
-        markers = [
-            plt.Line2D([0, 0], [0, 0], color=color, marker="o", linestyle="")
-            for color in tree2_outline_legend.values()
-        ]
-        labels = ["\n".join(wrap(l, 15)) for l in tree2_outline_legend.keys()]
-        legend2b = ax.legend(
-            markers,
-            labels,
-            title=f"Outline colour\n{outline_right}",
-            loc="upper right",
-            bbox_to_anchor=(1.08, y_bottom - spacing),  # same x as legend2
-            # borderaxespad=3,
-        )
-        ax.add_artist(legend2b)
+            # Get bounding box of first legend (in display coords)
+            bbox = legend2.get_window_extent()
+            bbox_axes = bbox.transformed(ax.transAxes.inverted())
+            y_bottom = bbox_axes.y0
+            spacing = 0.01
+            markers = [
+                plt.Line2D([0, 0], [0, 0], color=color, marker="o", linestyle="")
+                for color in tree2_outline_legend.values()
+            ]
+            labels = ["\n".join(wrap(l, 15)) for l in tree2_outline_legend.keys()]
+            legend2b = ax.legend(
+                markers,
+                labels,
+                title=f"Outline colour\n{outline_right}",
+                loc="upper right",
+                bbox_to_anchor=(1.08, y_bottom - spacing),  # same x as legend2
+                # borderaxespad=3,
+            )
+            ax.add_artist(legend2b)
 
         # Tangle legend on top
         if pd.api.types.is_numeric_dtype(df[tangles]):
@@ -1908,6 +1949,8 @@ def plot_tanglegram_full(
 
             cbar = plt.colorbar(sm, ax=ax, fraction=0.03, pad=0.02)
             cbar.set_label(tangles)
+        elif len(tangle_legend.values()) == 0:
+            print("")
         else:
             markers = [
                 plt.Line2D([0, 0], [0, 0], color=color, marker="o", linestyle="")
@@ -1939,21 +1982,30 @@ def plot_single_tangle(
 ):
     tangle_df = df_in.copy()
 
-    fig, ax = plt.subplots(figsize=(12, 20))
+    tangle_df = tangle_df.rename(
+        columns={
+            tangle: "Group Host Lineages",
+            left_node: "Group index",
+            right_node: "Isolate ST",
+        }
+    )
+
+    fig, ax = plt.subplots(figsize=FIGSIZE_PORTRAIT)
     plot_tanglegram_full(
-        f"mashtree/{cluster_id}_tree.dnd",
-        f"mashtree/{cluster_id}_chr_tree.dnd",
+        f"output/mashtree/{cluster_id}/{cluster_id}_tree.dnd",
+        f"output/mashtree/{cluster_id}/{cluster_id}_chr_tree.dnd",
         tangle_df,
         ax,
-        left_node,
-        right_node,
-        tangle,
-        outline=True,
-        outline_left=outline_left,
-        outline_right=outline_right,
+        "Group index",
+        "Isolate ST",
+        "Group Host Lineages",
+        # outline=True,
+        # outline_left=outline_left,
+        # outline_right=outline_right,
+        outlier_only=True,
     )
     plt.savefig(
-        f"results/outlier_tangles/{cluster_id}.png",
+        f"results/trees/outlier_tangles/{cluster_id}.png",
         # bbox_inches="tight",
         dpi=600,
     )

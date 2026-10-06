@@ -74,6 +74,8 @@ def save_glm_tables(
     name,
     reference_categories,
     term_labels=None,
+    correction_method="fdr_bh",
+    correction_by_variable=True,
 ):
     """
     Save publication-ready GLM results as two CSV files.
@@ -85,6 +87,7 @@ def save_glm_tables(
         Exponentiated coefficients (IRRs) with 95% CIs.
         Intercept is excluded.
         Reference categories are explicitly included.
+        Multiple-testing adjusted P values are included.
 
     Parameters
     ----------
@@ -99,11 +102,20 @@ def save_glm_tables(
 
     reference_categories : dict
         Reference categories, e.g.
-        {"origin": "CA-MRSA"}
+        {"origin": "CA-MRSA"}.
 
     term_labels : dict, optional
         Dictionary to make coefficient names more readable.
 
+    correction_method : str, optional
+        Method passed to statsmodels.stats.multitest.multipletests.
+        Default is Benjamini-Hochberg FDR ("fdr_bh").
+
+    correction_by_variable : bool, optional
+        If True, perform multiple-testing correction separately for
+        each categorical variable (e.g. all ST comparisons together
+        and all origin comparisons together). If False, all model
+        coefficients are corrected together.
     """
 
     # =========================================================
@@ -193,7 +205,69 @@ def save_glm_tables(
     # Remove intercept
     results = results[results["Term"] != "Intercept"].copy()
 
+    # ---------------------------------------------------------
+    # Multiple-testing correction
+    # ---------------------------------------------------------
+    results["P_value_adjusted"] = np.nan
+
+    if correction_by_variable:
+
+        # Identify the original model term before cleaning it
+        # so that coefficients can be grouped by categorical
+        # variable.
+        def get_variable(term):
+            if term.startswith("C(origin)"):
+                return "origin"
+            elif term.startswith("C(ST_collapsed)"):
+                return "ST_collapsed"
+            else:
+                return "other"
+
+        results["_correction_group"] = results["Term"].apply(get_variable)
+
+        for group, idx in results.groupby("_correction_group").groups.items():
+
+            if group == "other":
+                continue
+
+            pvalues = results.loc[idx, "P_value"].values
+
+            _, p_adjusted, _, _ = multipletests(
+                pvalues,
+                method=correction_method,
+            )
+
+            results.loc[idx, "P_value_adjusted"] = p_adjusted
+
+        # Any coefficients not belonging to a recognised
+        # categorical variable are corrected as one group.
+        other_idx = results.index[results["_correction_group"] == "other"]
+
+        if len(other_idx) > 0:
+            pvalues = results.loc[other_idx, "P_value"].values
+
+            _, p_adjusted, _, _ = multipletests(
+                pvalues,
+                method=correction_method,
+            )
+
+            results.loc[other_idx, "P_value_adjusted"] = p_adjusted
+
+        results = results.drop(columns="_correction_group")
+
+    else:
+        pvalues = results["P_value"].values
+
+        _, p_adjusted, _, _ = multipletests(
+            pvalues,
+            method=correction_method,
+        )
+
+        results["P_value_adjusted"] = p_adjusted
+
+    # ---------------------------------------------------------
     # Make term names readable
+    # ---------------------------------------------------------
     def clean_term(term):
         term = term.replace("C(origin)[T.", "")
         term = term.replace("C(ST_collapsed)[T.", "")
@@ -205,8 +279,11 @@ def save_glm_tables(
     if term_labels is not None:
         results["Term"] = results["Term"].replace(term_labels)
 
-    # Add reference categories
+    # =========================================================
+    # ADD REFERENCE CATEGORIES
+    # =========================================================
     reference_rows = []
+
     for variable, category in reference_categories.items():
         variable_label = {
             "origin": "Origin",
@@ -220,24 +297,33 @@ def save_glm_tables(
                 "SE": np.nan,
                 "z": np.nan,
                 "P_value": np.nan,
+                "P_value_adjusted": np.nan,
                 "CI_lower": np.nan,
                 "CI_upper": np.nan,
             }
         )
 
     reference_df = pd.DataFrame(reference_rows)
+
     results = pd.concat(
         [reference_df, results],
         ignore_index=True,
     )
 
-    # Format values
+    # =========================================================
+    # FORMAT VALUES
+    # =========================================================
     results["IRR"] = results["IRR"].round(3)
     results["SE"] = results["SE"].round(3)
     results["z"] = results["z"].round(3)
     results["CI_lower"] = results["CI_lower"].round(3)
     results["CI_upper"] = results["CI_upper"].round(3)
+
     results["P_value"] = results["P_value"].apply(
+        lambda x: ("" if pd.isna(x) else "<0.001" if x < 0.001 else f"{x:.3f}")
+    )
+
+    results["P_value_adjusted"] = results["P_value_adjusted"].apply(
         lambda x: ("" if pd.isna(x) else "<0.001" if x < 0.001 else f"{x:.3f}")
     )
 
@@ -246,11 +332,13 @@ def save_glm_tables(
         columns={
             "CI_lower": "IRR_95CI_lower",
             "CI_upper": "IRR_95CI_upper",
-            "P_value": "P_value",
+            "P_value_adjusted": "P_value_FDR",
         }
     )
 
-    # Save table B: Model outcome
+    # =========================================================
+    # SAVE TABLE B
+    # =========================================================
     results.to_csv(
         f"results/tables/{name}_B.csv",
         sep=";",
@@ -2210,22 +2298,24 @@ def dataset_overview(df_plasmids_in: pd.DataFrame, df_isolates_in: pd.DataFrame)
             f"results/dataset_overview/{col}_only_carriage_rates.csv", sep=";"
         )
 
-    # gene_statics = gene_origin_enrichment(df_plasmids)
-    # gene_statics.to_csv(f"results/dataset_overview/gene_distribution_full.csv", sep=";")
-    # primary_cols = [
-    #     "gene",
-    #     "p_chi2_adj",
-    #     "p_chi2_perm_adj",
-    #     "cramers_v",
-    #     "resid_pos_CA-MRSA",
-    #     "resid_pos_HA-MRSA",
-    #     "resid_pos_LA-MRSA",
-    #     "resid_pos_MSSA",
-    #     "resid_pos_Sar",
-    # ]
+    gene_statics = gene_origin_enrichment(df_plasmids)
+    gene_statics.to_csv(f"results/dataset_overview/gene_distribution_full.csv", sep=";")
+    primary_cols = [
+        "gene",
+        "p_chi2_adj",
+        "p_chi2_perm_adj",
+        "cramers_v",
+        "resid_pos_CA-MRSA",
+        "resid_pos_HA-MRSA",
+        "resid_pos_LA-MRSA",
+        "resid_pos_MSSA",
+        "resid_pos_Sar",
+    ]
 
-    # supplementary_df = gene_statics[primary_cols]
-    # supplementary_df.to_csv(f"results/tables/tableS4_gene_distribution.csv", sep=";", index=False)
+    supplementary_df = gene_statics[primary_cols]
+    supplementary_df.to_csv(
+        f"results/tables/tableS4_gene_distribution.csv", sep=";", index=False
+    )
 
     tables = []
     for col in gene_columns:
@@ -2370,13 +2460,13 @@ def cluster_overview(df_in: pd.DataFrame, metadata_df: pd.DataFrame):
 
     plot.composition_by_cluster(df)
 
-    # # ---------------------------------------------------------
-    # # 3.2.3 Plasmidome differences
-    # # ---------------------------------------------------------
-    # composition_dict = compartment_plasmidome_dispersion(df_clustered)
-    # tables = save_plasmidome_tables(
-    #     composition_dict,
-    # )
+    # ---------------------------------------------------------
+    # 3.2.3 Plasmidome differences
+    # ---------------------------------------------------------
+    composition_dict = compartment_plasmidome_dispersion(df_clustered)
+    tables = save_plasmidome_tables(
+        composition_dict,
+    )
 
     # ---------------------------------------------------------
     # 3.2.4 Cluster functional gene composition
@@ -2424,8 +2514,9 @@ def cluster_overview(df_in: pd.DataFrame, metadata_df: pd.DataFrame):
 
 
 if __name__ == "__main__":
-    metadata_df = pd.read_csv("data/metadata.csv", encoding="ISO-8859-1", sep=";")
-    clustering_df = pd.read_csv("data/clustering.csv")
-    plasmid_df = clean_plasmid_df(metadata_df, clustering_df)
-    dataset_overview(plasmid_df)
-    cluster_overview(plasmid_df)
+    print(
+        "Functions related to analysing the MRSA plasmid dataset and cluster composistion."
+    )
+    print(
+        "Used by mrsa_plasmid_analyis.py. Produces figures 1-5, S1-2 and tables S1-7."
+    )

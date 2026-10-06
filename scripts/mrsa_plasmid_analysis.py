@@ -97,8 +97,8 @@ def mrsa_plasmid_analysis():
     metadata_df = clean_plasmid_df(metadata_df, clustering_df, False)
     plasmid_df.to_csv("data/merged_data.csv", sep=";", index=False)
 
-    # # Run population-level analysis
-    # population_description.dataset_overview(plasmid_df, metadata_df)
+    # Run population-level analysis
+    population_description.dataset_overview(plasmid_df, metadata_df)
 
     # # ---------------------------------------------------------
     # # 4. Scheme / cluster-level description
@@ -114,7 +114,11 @@ def mrsa_plasmid_analysis():
 
     # # Create the wgMLST distance files
     # nearest_neighbour_analysis.wgMLST_converter()
-    nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
+    # nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
+
+    # # Calculate mash distances and create phylogenetic trees
+    # os.makedirs("results/trees/outlier_tangles/", exist_ok=True)
+    # nearest_neighbour_analysis.run_nn_analysis(plasmid_df)
 
     # # Run sequence-level analysis
     # bin_dynamics.bin_post_hoc(plasmid_df)

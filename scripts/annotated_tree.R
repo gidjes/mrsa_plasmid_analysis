@@ -78,12 +78,12 @@ categorical_colours <- c(
 # if the new project's data uses different column names - nothing below the
 # CONFIGURATION section needs to change.
 DEFAULT_COLUMNS <- list(
-  id       = "Plasmid",   # unique identifier that matches the tree tip labels
-  cluster  = "Standard_Cluster_mrsa",   # column used to subset plasmid_df to one cluster
-  st       = "ISOLATE_TL_MLST_ST",    # sequence type column
+  id       = "Plasmid", # unique identifier that matches the tree tip labels
+  cluster  = "Standard_Cluster_mrsa", # column used to subset plasmid_df to one cluster
+  st       = "ISOLATE_TL_MLST_ST", # sequence type column
   genes    = c("amr", "virulence", "metal", "biocide"), # gene-presence columns (comma-separated lists)
-  origin   = "origin",# sample origin column
-  replicon = "replicon"       # tip-level replicon column (comma-separated list allowed)
+  origin   = "origin", # sample origin column
+  replicon = "replicon" # tip-level replicon column (comma-separated list allowed)
 )
 
 
@@ -113,11 +113,11 @@ scale_fill_custom_discrete <- function(n, color_list) {
 custom_hierarchical_palette <- function(df, main_categories_name, subcategories_name, colors) {
   families <- split(df[, subcategories_name], df[, main_categories_name])
   subcategories <- lapply(families, unique)
-  
+
   main_categories <- sort(unique(df[, main_categories_name]))
   main_palette <- colorRampPalette(colors)(length(main_categories))
   category_colors <- c()
-  
+
   for (i in seq_along(main_categories)) {
     base_color <- main_palette[i]
     subs <- subcategories[[main_categories[i]]]
@@ -130,7 +130,7 @@ custom_hierarchical_palette <- function(df, main_categories_name, subcategories_
     }
     category_colors <- c(category_colors, setNames(sub_palette, subs))
   }
-  
+
   category_colors
 }
 
@@ -159,15 +159,15 @@ build_presence_matrix <- function(df, id_col, category_col, sep = NULL,
   data <- df[, c(id_col, category_col)]
   colnames(data) <- c("id", "category")
   data <- data[!is.na(data$category) & data$category != "", , drop = FALSE]
-  
+
   if (!is.null(sep)) {
     data <- tidyr::separate_rows(data, category, sep = sep)
   }
-  
+
   data$category <- trimws(data$category)
   data <- data[data$category != "", , drop = FALSE]
   data <- unique(data)
-  
+
   data$present <- "Present"
   data$source <- category_label
   as.data.frame(data)
@@ -184,12 +184,12 @@ build_gene_matrix <- function(df, id_col, gene_cols, sep = ",") {
   out <- do.call(rbind, pieces)
   colnames(out)[colnames(out) == "category"] <- "gene"
   colnames(out)[colnames(out) == "source"] <- "gene_type"
-  
+
   out$gene_type <- factor(out$gene_type, levels = gene_cols)
-  
+
   gene_levels <- unique(out$gene[order(out$gene_type, out$gene)])
   out$gene <- factor(out$gene, levels = gene_levels)
-  
+
   out
 }
 
@@ -238,44 +238,42 @@ load_plasmid_data <- function(path, sep = ";") {
 #          x scale. The dummy is explicitly removed from the displayed axis.
 #
 add_geom_fruit_safety_data <- function(dat, x_col) {
-  
   # ---- No annotation data ---------------------------------------------------
   if (nrow(dat) == 0) {
     dat$.geom_fruit_alpha <- numeric(0)
     dat$.geom_fruit_dummy <- logical(0)
     return(dat)
   }
-  
+
   # Store original state
   dat$.geom_fruit_alpha <- 1
   dat$.geom_fruit_dummy <- FALSE
-  
+
   # Unique non-NA x values
   x_values <- unique(
     dat[[x_col]][!is.na(dat[[x_col]])]
   )
-  
+
   # ---- Exactly one row or multiple rows but only one x category-------------
   # Add one dummy x category. It is marked explicitly so that the plotting
   # code can exclude it from the displayed axis and from pwidth calculations.
   #
   if (nrow(dat) == 1 || length(x_values) == 1) {
-    
     dummy <- dat[1, , drop = FALSE]
-    
+
     dummy[[x_col]] <- paste0(
       "__"
     )
-    
+
     dummy$.geom_fruit_alpha <- 0
     dummy$.geom_fruit_dummy <- TRUE
-    
+
     return(
       rbind(dat, dummy)
     )
   }
-  
-  
+
+
   # ---- Normal case ----------------------------------------------------------
   dat
 }
@@ -284,7 +282,7 @@ add_geom_fruit_safety_data <- function(dat, x_col) {
 # ------------------------------------------------------------------------------
 # 7. MAIN PLOTTING FUNCTION
 # ------------------------------------------------------------------------------
- 
+
 #' Build and save the annotated tree for one cluster.
 #'
 #' @param cluster     cluster identifier, e.g. "56". Used both to find the
@@ -296,39 +294,38 @@ add_geom_fruit_safety_data <- function(dat, x_col) {
 #' @param output_dir  directory the svg/png outputs are written to
 #' @param width,height,units  passed straight to ggsave()
 plot_cluster_tree <- function(cluster,
-                               plasmid_df,
-                               columns = DEFAULT_COLUMNS,
-                               tree_dir = "mashtree",
-                               output_dir = "results/trees/annotated",
-                               width = 210, height = 297, units = "mm") {
- 
-  id_col       <- columns$id
-  cluster_col  <- columns$cluster
-  st_col       <- columns$st
-  gene_cols    <- columns$genes
-  origin_col   <- columns$origin
+                              plasmid_df,
+                              columns = DEFAULT_COLUMNS,
+                              tree_dir = "output/mashtree",
+                              output_dir = "results/trees/annotated",
+                              width = 210, height = 297, units = "mm") {
+  id_col <- columns$id
+  cluster_col <- columns$cluster
+  st_col <- columns$st
+  gene_cols <- columns$genes
+  origin_col <- columns$origin
   replicon_col <- columns$replicon
- 
+
   # ---- 6.1 Read the tree for this cluster ----------------------------------
-  tree_path <- file.path(tree_dir, sprintf("%s_tree.dnd", cluster))
+  tree_path <- file.path(tree_dir, sprintf("%s", cluster), sprintf("%s_tree.dnd", cluster))
   message(sprintf("Reading tree: %s", tree_path))
   tree <- read.tree(tree_path)
- 
+
   # ---- 6.2 Subset the metadata to this cluster ------------------------------
   cluster_df <- plasmid_df[plasmid_df[[cluster_col]] == cluster, , drop = FALSE]
   if (nrow(cluster_df) == 0) {
     stop(sprintf("No rows in plasmid_df where %s == '%s'", cluster_col, cluster))
   }
- 
+
   # ---- 6.3 Attach tip-level replicon info directly onto the tree -----------
   # (so ggtree can map it with aes() without a further join downstream)
   replicon_lookup <- collapse_to_single_value(cluster_df, id_col, replicon_col)
   colnames(replicon_lookup)[colnames(replicon_lookup) == id_col] <- "label"
   tree <- dplyr::full_join(tree, replicon_lookup, by = "label")
- 
+
   # ---- 6.4 Build the three ring-annotation blocks ---------------------------
-  st_matrix     <- build_presence_matrix(cluster_df, id_col, st_col)
-  gene_matrix   <- build_gene_matrix(cluster_df, id_col, gene_cols)
+  st_matrix <- build_presence_matrix(cluster_df, id_col, st_col)
+  gene_matrix <- build_gene_matrix(cluster_df, id_col, gene_cols)
   origin_matrix <- build_presence_matrix(cluster_df, id_col, origin_col)
   st_matrix <- add_geom_fruit_safety_data(
     st_matrix,
@@ -339,7 +336,7 @@ plot_cluster_tree <- function(cluster,
       !st_matrix$.geom_fruit_dummy
     ]
   )
-  
+
   gene_matrix <- add_geom_fruit_safety_data(
     gene_matrix,
     "gene"
@@ -349,7 +346,7 @@ plot_cluster_tree <- function(cluster,
       !gene_matrix$.geom_fruit_dummy
     ]
   )
-  
+
   origin_matrix <- add_geom_fruit_safety_data(
     origin_matrix,
     "category"
@@ -359,37 +356,37 @@ plot_cluster_tree <- function(cluster,
       !origin_matrix$.geom_fruit_dummy
     ]
   )
-  
+
   GENE_PALETTE <- c(
     "amr" = "#de584e",
-    "virulence"     = "#32c8d3",
-    "metal"     = "#9B9B9B",
-    "biocide"        = "#2de920"
+    "virulence" = "#32c8d3",
+    "metal" = "#9B9B9B",
+    "biocide" = "#2de920"
   )
-  
+
   gene_palette <- GENE_PALETTE
-  
+
   ORIGIN_PALETTE <- c(
-    "LA-MRSA"     = "#1baa62",
-    "HA-MRSA"     = "#d52b1e",
-    "CA-MRSA"     = "#007bc7",
-    "MSSA"        = "#737070",
+    "LA-MRSA" = "#1baa62",
+    "HA-MRSA" = "#d52b1e",
+    "CA-MRSA" = "#007bc7",
+    "MSSA" = "#737070",
     "Sar" = "#C6C83A"
   )
-  
+
   origin_palette <- ORIGIN_PALETTE
- 
+
   n <- nrow(cluster_df)
-  
+
   linewidth <- if (n <= 100) {
     1
   } else {
     1 - ((n - 100) / 700)^0.5 * 0.9
   }
-  
+
   # ---- 6.5 Base tree, tips coloured by replicon -----------------------------
   tree_plot <- ggtree(tree) +
-    geom_treescale(y=-2) +
+    geom_treescale(y = -2) +
     labs(title = "") +
     theme(
       panel.background   = element_blank(),
@@ -402,11 +399,11 @@ plot_cluster_tree <- function(cluster,
       plot.title         = element_blank(),
       legend.background  = element_blank()
     )
- 
+
   tree_tips <- tree_plot +
     geom_tippoint(aes(colour = .data[[replicon_col]]), size = 2.5, na.rm = TRUE) +
     guides(colour = guide_legend(ncol = 1, title = "Replicon", order = 1))
- 
+
   # ---- 6.6 Block 1: Sequence Type (ST), one column per ST -------------------
   if (nrow(st_matrix) > 0) {
     tree_st <- tree_tips +
@@ -423,7 +420,7 @@ plot_cluster_tree <- function(cluster,
         axis.params = list(
           axis = "x",
           text.angle = -60,
-          text.size = 4,
+          text.size = 3,
           line.size = 0.2,
           vjust = 0.5,
           hjust = 0,
@@ -432,7 +429,7 @@ plot_cluster_tree <- function(cluster,
           title.height = 0.02
         ),
         size = linewidth,
-        pwidth = max(2, length(st_categories)) / 10,,
+        pwidth = max(2, length(st_categories)) / 10, ,
         offset = 0.12,
         color = "#FFFFFF",
         grid.params = list(
@@ -454,10 +451,9 @@ plot_cluster_tree <- function(cluster,
   } else {
     tree_st <- tree_tips
   }
- 
+
   # ---- 6.7 Block 2: functional genes, coloured by gene type -----------------
   if (nrow(gene_matrix) > 0) {
-    
     tree_genes <- tree_st +
       new_scale_fill() +
       geom_fruit(
@@ -472,7 +468,7 @@ plot_cluster_tree <- function(cluster,
         axis.params = list(
           axis = "x",
           text.angle = -60,
-          text.size = 4,
+          text.size = 3,
           line.size = 0.2,
           vjust = 0.5,
           hjust = 0,
@@ -503,10 +499,9 @@ plot_cluster_tree <- function(cluster,
   } else {
     tree_genes <- tree_st
   }
-  
+
   # ---- 6.8 Block 3: origin, one column per origin, coloured by origin -------
   if (nrow(origin_matrix) > 0) {
-    
     tree_full <- tree_genes +
       new_scale_fill() +
       geom_fruit(
@@ -521,7 +516,7 @@ plot_cluster_tree <- function(cluster,
         axis.params = list(
           axis = "x",
           text.angle = -60,
-          text.size = 4,
+          text.size = 3,
           line.size = 0.2,
           vjust = 0.5,
           hjust = 0,
@@ -553,7 +548,7 @@ plot_cluster_tree <- function(cluster,
   } else {
     tree_full <- tree_genes
   }
-  
+
   tree_full <- tree_full +
     coord_cartesian(clip = "off") +
     theme(
@@ -566,19 +561,19 @@ plot_cluster_tree <- function(cluster,
         l = 10
       )
     )
-  
+
   # ---- 6.9 Save outputs -------------------------------------------------------
   dir.create(output_dir, showWarnings = FALSE, recursive = TRUE)
   svg_path <- file.path(output_dir, sprintf("%s_tree.svg", cluster))
   png_path <- file.path(output_dir, sprintf("%s_tree.png", cluster))
- 
-  #ggsave(svg_path, plot = tree_full, width = width, height = height, units = units)
+
+  # ggsave(svg_path, plot = tree_full, width = width, height = height, units = units)
   ggsave(png_path, plot = tree_full, width = width, height = height, units = units)
   message(sprintf("Saved: %s and %s", svg_path, png_path))
- 
+
   tree_full
 }
- 
+
 
 
 # ------------------------------------------------------------------------------
@@ -595,10 +590,10 @@ if (sys.nframe() == 0 && !interactive()) {
     stop("Usage: Rscript plot_cluster_tree.R <cluster_id>  e.g. Rscript plot_cluster_tree.R 56")
   }
   cluster_id <- args[1]
-  
+
   plasmid_df <- load_plasmid_data("data/merged_data.csv")
   plot_cluster_tree(cluster_id, plasmid_df)
 }
-for (cluster_id in 0:53) {
-  plot_cluster_tree(cluster_id, plasmid_df)
-}
+# for (cluster_id in 0:53) {
+#   plot_cluster_tree(cluster_id, plasmid_df)
+# }

@@ -46,13 +46,11 @@
 # F8  bin graph deduplication.
 # F10 summary_df built once and passed everywhere.
 # ============================================================
-
 import glob
 import os
 import re
 from itertools import combinations
 from collections import Counter
-
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -64,6 +62,7 @@ from introduction_analysis import (
     run_introduction_analysis,
     run_postintroduction_dynamics,
 )
+import config
 
 # ============================================================
 # CONSTANTS
@@ -80,14 +79,12 @@ CAT_UNKNOWN = "unknown"
 # Worst-case ordering for bin-level promiscuity level
 CAT_RANK = {CAT_CLONAL: 0, CAT_GENOGROUP: 1, CAT_DISTANT: 2, CAT_UNKNOWN: -1}
 
-ACCESSORY_GENES = ["amr", "virulence", "biocide", "metal"]
+ACCESSORY_GENES = [config.AMR_COL, config.VIR_COL, config.METAL_COL, config.BIOCIDE_COL]
 
 
 # ============================================================
 # DISTANCE HELPERS
 # ============================================================
-
-
 def categorise_wgmlst(dist):
     """Map a numeric wgMLST distance to a category string."""
     try:
@@ -245,40 +242,6 @@ def derive_mash_cutoffs(all_pairwise_df):
 # ============================================================
 # GENERAL HELPERS
 # ============================================================
-
-
-def gene_annotation(df):
-    """Add has_* boolean and n_*_genes count columns for each accessory gene type."""
-    df = df.copy()
-    df.columns = df.columns.str.strip()
-    for gene in ACCESSORY_GENES:
-        if gene not in df.columns:
-            df[gene] = np.nan
-        df[f"has_{gene}"] = df[gene].fillna("").astype(str).str.strip() != ""
-        df[f"n_{gene}_genes"] = (
-            df[gene].fillna("").apply(lambda x: 0 if x == "" else len(x.split(",")))
-        )
-    # Backward-compatible alias used elsewhere
-    df["AMR_plasmid"] = df["amr"].apply(lambda x: 0 if pd.isna(x) else 1)
-    return df
-
-
-def load_plasmid_df(plasmid_df):
-    """Load and preprocess the plasmid metadata table once."""
-    plasmid_df.fillna(
-        {"ISOLATE_TL_MLST_ST": "Unknown", "origin": "Unknown"}, inplace=True
-    )
-    # [F6] Cast Standard_Cluster_mrsa to str before string comparisons
-    plasmid_df["Standard_Cluster_mrsa"] = (
-        plasmid_df["Standard_Cluster_mrsa"].astype(str).str.strip()
-    )
-    plasmid_df = plasmid_df.drop_duplicates()
-    plasmid_df = gene_annotation(plasmid_df)
-    plasmid_df.columns = plasmid_df.columns.str.strip()
-    plasmid_df = plasmid_df.loc[:, ~plasmid_df.columns.duplicated()]
-    return plasmid_df
-
-
 def empirical_pvalue(observed, null_dist, alternative="greater"):
     """
     Phipson & Smyth empirical p-value.
@@ -371,7 +334,10 @@ def process_cluster(
 
     # ── Build graph → connected components [F8] ───────────────
     G = nx.Graph()
-    for _, row in pairwise_df.iterrows():
+
+    mask = pairwise_df["is_bin"]
+
+    for _, row in pairwise_df.loc[mask].iterrows():
         G.add_edge(row["outlier_plasmid"], row["neighbour_plasmid"])
 
     components = list(nx.connected_components(G))
@@ -382,7 +348,10 @@ def process_cluster(
         for i, component in enumerate(components)
         for plasmid in component
     }
-    pairwise_df["bin_id"] = pairwise_df["outlier_plasmid"].map(plasmid_to_bin)
+    outlier_bin = pairwise_df["outlier_plasmid"].map(plasmid_to_bin)
+    neighbour_bin = pairwise_df["neighbour_plasmid"].map(plasmid_to_bin)
+
+    pairwise_df["bin_id"] = outlier_bin.where(outlier_bin.eq(neighbour_bin))
 
     # ── Per-bin summaries ─────────────────────────────────────
     bin_summaries = []
@@ -391,7 +360,6 @@ def process_cluster(
         bin_id = f"{cluster_id}_{i + 1}"
         sub = pairwise_df[pairwise_df["bin_id"] == bin_id].copy()
         meta = plasmid_df[plasmid_df["Plasmid"].isin(members)]
-
         # Compartment set
         comp_set = {
             comp_lookup.get(pid)
@@ -408,11 +376,11 @@ def process_cluster(
 
         # Accessory gene counts
         gene_counts = {}
-        for gene in ACCESSORY_GENES:
-            col = f"has_{gene}"
+        for GENE_TYPE in ACCESSORY_GENES:
+            col = f"{GENE_TYPE}_plasmid"
             n_gene = int(meta[col].sum()) if col in meta.columns else 0
-            gene_counts[f"n_{gene}_plasmids"] = n_gene
-            gene_counts[f"contains_{gene}"] = n_gene > 0
+            gene_counts[f"n_{GENE_TYPE}_plasmids"] = n_gene
+            gene_counts[f"contains_{GENE_TYPE}"] = n_gene > 0
 
         # [F3] Deduplicate edges — canonical direction: outlier <= neighbour
         sub_dedup = sub[
@@ -667,8 +635,8 @@ def accessory_gene_enrichment(summary_df, plasmid_df):
     n_in_bin = int(pdf["in_bin"].sum())
 
     rows = []
-    for gene in ACCESSORY_GENES:
-        col = f"has_{gene}"
+    for GENE_TYPE in ACCESSORY_GENES:
+        col = f"{GENE_TYPE}_plasmid"
         if col not in pdf.columns:
             continue
 
@@ -704,7 +672,7 @@ def accessory_gene_enrichment(summary_df, plasmid_df):
         else:
             p_distant = np.nan
 
-        print(f"\n  {gene.upper()}")
+        print(f"\n  {GENE_TYPE.upper()}")
         print(f"    Dataset : {n_gene_total}/{n_total} ({pct_gene_dataset:.1f}%)")
         print(f"    In bins : {n_gene_in_bin}/{n_in_bin} ({pct_gene_bins:.1f}%)")
         print(
@@ -720,7 +688,7 @@ def accessory_gene_enrichment(summary_df, plasmid_df):
 
         rows.append(
             {
-                "gene_type": gene,
+                "gene_type": GENE_TYPE,
                 "n_total_dataset": n_total,
                 "n_gene_in_dataset": n_gene_total,
                 "pct_gene_in_dataset": pct_gene_dataset,
@@ -1002,17 +970,17 @@ def host_distance_analysis(summary_df, all_pairwise_df):
         print(f"  {lvl:12s}: {n} bins  ({n / len(df) * 100:.1f}%)")
 
     # ── Accessory gene bins vs. non-carrying ──────────────────
-    for gene in ACCESSORY_GENES:
-        col = f"contains_{gene}"
+    for GENE_TYPE in ACCESSORY_GENES:
+        col = f"contains_{GENE_TYPE}"
         if col not in df.columns:
             continue
         pos = df.loc[df[col], "max_host_dist"].dropna()
         neg = df.loc[~df[col], "max_host_dist"].dropna()
         if len(pos) == 0 and len(neg) == 0:
             continue
-        print(f"\nMax host dist — {gene} vs. non-{gene} bins:")
-        print(f"  {gene} bins     (n={len(pos)}): median={pos.median():.1f}")
-        print(f"  non-{gene} bins (n={len(neg)}): median={neg.median():.1f}")
+        print(f"\nMax host dist — {GENE_TYPE} vs. non-{GENE_TYPE} bins:")
+        print(f"  {GENE_TYPE} bins     (n={len(pos)}): median={pos.median():.1f}")
+        print(f"  non-{GENE_TYPE} bins (n={len(neg)}): median={neg.median():.1f}")
         if len(pos) > 0 and len(neg) > 0:
             stat, p = mannwhitneyu(pos, neg, alternative="two-sided")
             print(f"  Mann-Whitney U={stat:.0f}, p={p:.4f}")
@@ -1070,7 +1038,11 @@ def host_distance_analysis(summary_df, all_pairwise_df):
         "median_host_dist",
         "median_mash_plasmid_dist",
         "graph_density",
-    ] + [f"contains_{g}" for g in ACCESSORY_GENES if f"contains_{g}" in df.columns]
+    ] + [
+        f"contains_{GENE_TYPE}"
+        for GENE_TYPE in ACCESSORY_GENES
+        if f"contains_{GENE_TYPE}" in df.columns
+    ]
 
     df[[c for c in dist_export_cols if c in df.columns]].to_csv(
         f"output/hgt_summaries/host_distance_analysis.csv",
@@ -1244,6 +1216,7 @@ def aggregate_and_report(
     n_bins = len(summary_df)
     n_plasmids = len(bin_plasmid_ids)
     n_isolates = int(len(bin_meta["Parent"].unique()))
+    n_clusters = int(len(bin_meta[config.CLUSTER_COL].unique()))
     med_size = summary_df["bin_size"].median()
     q1 = summary_df["bin_size"].quantile(0.25)
     q3 = summary_df["bin_size"].quantile(0.75)
@@ -1254,6 +1227,7 @@ def aggregate_and_report(
     print(f"Plasmids in bins             : {n_plasmids}")
     print(f"Total bins                   : {n_bins}")
     print(f"Unique isolates spanned      : {n_isolates}")
+    print(f"Unique clusters spanned      : {n_clusters}")
     print(f"Median bin size              : {med_size:.1f}")
     print(f"IQR bin size                 : {q3 - q1:.1f}  (Q1={q1:.1f}, Q3={q3:.1f})")
     print(
@@ -1280,8 +1254,8 @@ def aggregate_and_report(
     print("====================")
     n_total = len(plasmid_df)
     n_in_bin = len(bin_meta)
-    for gene in ACCESSORY_GENES:
-        col = f"has_{gene}"
+    for GENE_TYPE in ACCESSORY_GENES:
+        col = f"{GENE_TYPE}_plasmid"
         if col not in plasmid_df.columns:
             continue
         n_gene_total = int(plasmid_df[col].sum())
@@ -1289,7 +1263,7 @@ def aggregate_and_report(
         pct_dataset = round(n_gene_total / n_total * 100, 1) if n_total else np.nan
         pct_bins = round(n_gene_bin / n_in_bin * 100, 1) if n_in_bin else np.nan
         print(
-            f"  {gene.upper():10s}: "
+            f"  {GENE_TYPE.upper():10s}: "
             f"dataset {n_gene_total}/{n_total} ({pct_dataset:.1f}%)  |  "
             f"in bins {n_gene_bin}/{n_in_bin} ({pct_bins:.1f}%)"
         )
@@ -1315,6 +1289,10 @@ def aggregate_and_report(
     # ── Master summary ─────────────────────────────────────────
     def _n(col):
         return int(summary_df[col].sum()) if col in summary_df.columns else np.nan
+
+    bin_meta = bin_meta.merge(
+        summary_df, how="left", left_on="bin_id", right_on="bin_id"
+    )
 
     posthoc_summary = pd.DataFrame(
         {
@@ -1356,7 +1334,7 @@ def aggregate_and_report(
                 "n_bio_bins_inter_compartment_distant",
                 "n_met_bins_inter_compartment_distant",
             ],
-            "value": [
+            "n_bins": [
                 n_bins,
                 n_plasmids,
                 n_isolates,
@@ -1514,13 +1492,158 @@ def aggregate_and_report(
                     ).sum()
                 ),
             ],
+            "n_plasmids": [
+                n_bins,
+                n_plasmids,
+                n_isolates,
+                med_size,
+                q1,
+                q3,
+                int((bin_meta["promiscuity_level"] == CAT_CLONAL).sum()),
+                int(
+                    (
+                        bin_meta["has_genogroup_edge"] & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(bin_meta["has_distant_edge"].sum()),
+                int(bin_meta["inter_compartment"].sum()),
+                int(
+                    (
+                        bin_meta["has_genogroup_edge"]
+                        & ~bin_meta["has_distant_edge"]
+                        & bin_meta["inter_compartment"]
+                    ).sum()
+                ),
+                int(
+                    (bin_meta["has_distant_edge"] & bin_meta["inter_compartment"]).sum()
+                ),
+                _n("contains_amr"),
+                _n("contains_virulence"),
+                _n("contains_biocide"),
+                _n("contains_metal"),
+                int(
+                    (
+                        bin_meta["contains_amr"]
+                        & (bin_meta["has_genogroup_edge"])
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_virulence"]
+                        & (bin_meta["has_genogroup_edge"])
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_biocide"]
+                        & (bin_meta["has_genogroup_edge"])
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_metal"]
+                        & (bin_meta["has_genogroup_edge"])
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int((bin_meta["contains_amr"] & bin_meta["has_distant_edge"]).sum()),
+                int(
+                    (
+                        bin_meta["contains_virulence"] & bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (bin_meta["contains_biocide"] & bin_meta["has_distant_edge"]).sum()
+                ),
+                int((bin_meta["contains_metal"] & bin_meta["has_distant_edge"]).sum()),
+                int((bin_meta["contains_amr"] & bin_meta["inter_compartment"]).sum()),
+                int(
+                    (
+                        bin_meta["contains_virulence"] & bin_meta["inter_compartment"]
+                    ).sum()
+                ),
+                int(
+                    (bin_meta["contains_biocide"] & bin_meta["inter_compartment"]).sum()
+                ),
+                int((bin_meta["contains_metal"] & bin_meta["inter_compartment"]).sum()),
+                int(
+                    (
+                        bin_meta["contains_amr"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_genogroup_edge"]
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_virulence"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_genogroup_edge"]
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_biocide"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_genogroup_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_metal"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_genogroup_edge"]
+                        & ~bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_amr"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_virulence"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_biocide"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+                int(
+                    (
+                        bin_meta["contains_metal"]
+                        & bin_meta["inter_compartment"]
+                        & bin_meta["has_distant_edge"]
+                    ).sum()
+                ),
+            ],
         }
+    )
+    posthoc_summary["%_bins"] = posthoc_summary["n_bins"] / n_bins
+    posthoc_summary["%_plasmids"] = posthoc_summary["n_plasmids"] / len(
+        plasmid_df["Plasmid"].unique()
     )
 
     print("\n====================")
     print("MASTER SUMMARY")
     print("====================")
-    print(posthoc_summary.to_string(index=False))
+    print(
+        posthoc_summary[
+            ["metric", "n_bins", "%_bins", "n_plasmids", "%_plasmids"]
+        ].to_string(index=False)
+    )
 
     # ── Exports ───────────────────────────────────────────────
     summary_df.to_csv(
@@ -1579,7 +1702,7 @@ def aggregate_and_report(
 #
 # Expected plasmid_df columns used here:
 #   Plasmid, origin, bin_id, MATERIAL_SAMPLINGDATE (dd-mm-yyyy),
-#   MATERIAL_SUBMITTER_MUNICIPALITY, amr, virulence, biocide, metal
+#   municipality, amr, virulence, biocide, metal
 #   (isolate ID assumed to be accessible via outlier_isolate /
 #    neighbour_isolate in all_pairwise_df, or via a column
 #    ISOLATE_ID in plasmid_df — see ISOLATE_ID_COL constant below)
@@ -1678,14 +1801,14 @@ def _build_distance_lookup(mash_df, wgmlst_df):
         wgmlst_lookup : {(a, b): wgmlst_dist}
     """
     mash_lookup = {
-        _canonical_pair(r.isolate_a, r.isolate_b): r.mash_dist
+        _canonical_pair(r.outlier_isolate, r.neighbour_isolate): r.mash_host_dist
         for r in mash_df.itertuples()
-        if pd.notna(r.mash_dist)
+        if pd.notna(r.mash_host_dist)
     }
     wgmlst_lookup = {
-        _canonical_pair(r.isolate_a, r.isolate_b): r.wgmlst_dist
+        _canonical_pair(r.outlier_isolate, r.neighbour_isolate): r.wgmlst_host_dist
         for r in wgmlst_df.itertuples()
-        if pd.notna(r.wgmlst_dist)
+        if pd.notna(r.wgmlst_host_dist)
     }
     return mash_lookup, wgmlst_lookup
 
@@ -1733,18 +1856,18 @@ def per_gene_enrichment(summary_df, plasmid_df):
 
     rows = []
 
-    for gene_type in ACCESSORY_GENES:
-        if gene_type not in pdf.columns:
+    for GENE_TYPE in ACCESSORY_GENES:
+        if GENE_TYPE not in pdf.columns:
             continue
 
-        pdf[f"_genes_{gene_type}"] = _parse_genes(pdf[gene_type])
+        pdf[f"_genes_{GENE_TYPE}"] = _parse_genes(pdf[GENE_TYPE])
 
         # All distinct gene names in this column
-        all_genes = [g for genes in pdf[f"_genes_{gene_type}"] for g in genes]
+        all_genes = [g for genes in pdf[f"_genes_{GENE_TYPE}"] for g in genes]
         gene_counts_total = Counter(all_genes)
 
         for gene_name, n_gene_total in gene_counts_total.items():
-            has_gene = pdf[f"_genes_{gene_type}"].apply(lambda gs: gene_name in gs)
+            has_gene = pdf[f"_genes_{GENE_TYPE}"].apply(lambda gs: gene_name in gs)
 
             n_gene_promiscuous = int((has_gene & pdf["in_promiscuous_bin"]).sum())
             n_nogene_promiscuous = int((~has_gene & pdf["in_promiscuous_bin"]).sum())
@@ -1774,7 +1897,7 @@ def per_gene_enrichment(summary_df, plasmid_df):
 
             rows.append(
                 {
-                    "gene_type": gene_type,
+                    "gene_type": GENE_TYPE,
                     "gene_name": gene_name,
                     "n_in_dataset": n_gene_total,
                     "pct_in_dataset": pct_dataset,
@@ -1823,8 +1946,8 @@ def per_gene_enrichment(summary_df, plasmid_df):
     pair_counter = Counter()
     for _, row in distant_meta.iterrows():
         gene_set = set()
-        for gene_type in ACCESSORY_GENES:
-            col = f"_genes_{gene_type}"
+        for GENE_TYPE in ACCESSORY_GENES:
+            col = f"_genes_{GENE_TYPE}"
             if col in distant_meta.columns:
                 gene_set.update(row[col])
         for pair in combinations(sorted(gene_set), 2):
@@ -1863,7 +1986,7 @@ def spatiotemporal_spread_index(summary_df, plasmid_df):
     """
     Per bin, compute:
       - date_range_days  : max − min sampling date within bin members
-      - n_municipalities : number of distinct MATERIAL_SUBMITTER_MUNICIPALITY
+      - n_municipalities : number of distinct municipality
       - spread_score     : date_range_days × n_municipalities (composite)
 
     Then test: do bins carrying each accessory gene type show wider
@@ -1891,7 +2014,7 @@ def spatiotemporal_spread_index(summary_df, plasmid_df):
         meta = pdf[pdf["Plasmid"].isin(members)]
 
         dates = meta["_date"].dropna()
-        munis = meta["MATERIAL_SUBMITTER_MUNICIPALITY"].dropna().astype(str).str.strip()
+        munis = meta["municipality"].dropna().astype(str).str.strip()
         munis = munis[munis != ""]
 
         date_range = (dates.max() - dates.min()).days if len(dates) >= 2 else np.nan
@@ -1914,8 +2037,8 @@ def spatiotemporal_spread_index(summary_df, plasmid_df):
             "n_municipalities": n_munis,
             "spread_score": spread_score,
         }
-        for gene in ACCESSORY_GENES:
-            col = f"contains_{gene}"
+        for GENE_TYPE in ACCESSORY_GENES:
+            col = f"contains_{GENE_TYPE}"
             row[col] = bin_row.get(col, False)
 
         spread_rows.append(row)
@@ -1924,8 +2047,8 @@ def spatiotemporal_spread_index(summary_df, plasmid_df):
 
     # ── Gene association with spread ──────────────────────────
     assoc_rows = []
-    for gene in ACCESSORY_GENES:
-        col = f"contains_{gene}"
+    for GENE_TYPE in ACCESSORY_GENES:
+        col = f"contains_{GENE_TYPE}"
         if col not in spread_df.columns:
             continue
         for metric, metric_label in [
@@ -1940,7 +2063,7 @@ def spatiotemporal_spread_index(summary_df, plasmid_df):
             stat, p = mannwhitneyu(pos, neg, alternative="two-sided")
             assoc_rows.append(
                 {
-                    "gene_type": gene,
+                    "gene_type": GENE_TYPE,
                     "metric": metric,
                     "median_gene_positive": round(pos.median(), 2),
                     "median_gene_negative": round(neg.median(), 2),
@@ -1954,7 +2077,7 @@ def spatiotemporal_spread_index(summary_df, plasmid_df):
     assoc_df = pd.DataFrame(assoc_rows)
     if not assoc_df.empty:
         assoc_df["padj"] = multipletests(assoc_df["p_value"], method="fdr_bh")[1]
-        assoc_df = assoc_df.sort_values("padj")
+        assoc_df = assoc_df.sort_values("gene_type")
         print("\nGene-type × spatiotemporal spread associations:")
         print(assoc_df.to_string(index=False))
 
@@ -2056,9 +2179,7 @@ def background_corrected_spread(summary_df, plasmid_df, mash_lookup, wgmlst_look
 
     pdf = plasmid_df.copy()
     pdf["_date"] = _parse_date(pdf["MATERIAL_SAMPLINGDATE"])
-    pdf["_muni"] = (
-        pdf["MATERIAL_SUBMITTER_MUNICIPALITY"].fillna("").astype(str).str.strip()
-    )
+    pdf["_muni"] = pdf["municipality"].fillna("").astype(str).str.strip()
 
     # Ensure isolate ID column exists; fall back to Plasmid if not
     if ISOLATE_ID_COL not in pdf.columns:
@@ -2149,8 +2270,8 @@ def background_corrected_spread(summary_df, plasmid_df, mash_lookup, wgmlst_look
                 ),
                 "dist_source": dist_source,
                 **{
-                    f"contains_{g}": bin_row.get(f"contains_{g}", False)
-                    for g in ACCESSORY_GENES
+                    f"contains_{GENE_TYPE}": bin_row.get(f"contains_{GENE_TYPE}", False)
+                    for GENE_TYPE in ACCESSORY_GENES
                 },
             }
         )
@@ -2183,8 +2304,8 @@ def background_corrected_spread(summary_df, plasmid_df, mash_lookup, wgmlst_look
             )
 
         # Gene-type association with diversity ratio
-        for gene in ACCESSORY_GENES:
-            col = f"contains_{gene}"
+        for GENE_TYPE in ACCESSORY_GENES:
+            col = f"contains_{GENE_TYPE}"
             if col not in bc_df.columns:
                 continue
             pos = bc_df.loc[bc_df[col], "diversity_ratio"].dropna()
@@ -2192,7 +2313,7 @@ def background_corrected_spread(summary_df, plasmid_df, mash_lookup, wgmlst_look
             if len(pos) >= 2 and len(neg) >= 2:
                 _, p = mannwhitneyu(pos, neg, alternative="two-sided")
                 print(
-                    f"  {gene.upper():10s}: ratio median "
+                    f"  {GENE_TYPE.upper():10s}: ratio median "
                     f"{pos.median():.3f} (n={len(pos)}) vs. "
                     f"{neg.median():.3f} (n={len(neg)})  p={p:.4f}"
                 )
@@ -2291,8 +2412,8 @@ def temporal_directionality(summary_df, plasmid_df, mash_lookup, wgmlst_lookup):
             "has_distant_edge": bin_row["has_distant_edge"],
             "max_host_dist": bin_row["max_host_dist"],
             **{
-                f"contains_{g}": bin_row.get(f"contains_{g}", False)
-                for g in ACCESSORY_GENES
+                f"contains_{GENE_TYPE}": bin_row.get(f"contains_{GENE_TYPE}", False)
+                for GENE_TYPE in ACCESSORY_GENES
             },
         }
         dir_rows.append(row)
@@ -2317,8 +2438,8 @@ def temporal_directionality(summary_df, plasmid_df, mash_lookup, wgmlst_lookup):
 
         # Gene-stratified rho summary
         strat_rows = []
-        for gene in ACCESSORY_GENES:
-            col = f"contains_{gene}"
+        for GENE_TYPE in ACCESSORY_GENES:
+            col = f"contains_{GENE_TYPE}"
             if col not in dir_df.columns:
                 continue
             pos = dir_df.loc[dir_df[col], "spearman_rho"].dropna()
@@ -2327,7 +2448,7 @@ def temporal_directionality(summary_df, plasmid_df, mash_lookup, wgmlst_lookup):
                 stat, p = mannwhitneyu(pos, neg, alternative="two-sided")
                 strat_rows.append(
                     {
-                        "gene_type": gene,
+                        "gene_type": GENE_TYPE,
                         "n_gene_positive_bins": len(pos),
                         "median_rho_gene_positive": round(pos.median(), 4),
                         "n_gene_negative_bins": len(neg),
@@ -2360,14 +2481,11 @@ def temporal_directionality(summary_df, plasmid_df, mash_lookup, wgmlst_lookup):
 # ============================================================
 # COORDINATOR
 # ============================================================
-
-
 def spatiotemporal_hgt_analysis(
     summary_df,
     plasmid_df,
-    # all_pairwise_df,
-    mash_dist_path,
-    wgmlst_dist_path,
+    all_pairwise_df,
+    # pairwise_dist,
 ):
     """
     Run all four spatiotemporal / per-gene analyses.
@@ -2398,9 +2516,10 @@ def spatiotemporal_hgt_analysis(
 
     # ── Load distance matrices once ───────────────────────────
     print("\nLoading distance matrices ...")
-    mash_df = _load_mash(mash_dist_path)
-    wgmlst_df = _load_wgmlst(wgmlst_dist_path)
-    mash_lookup, wgmlst_lookup = _build_distance_lookup(mash_df, wgmlst_df)
+    mash_lookup, wgmlst_lookup = _build_distance_lookup(
+        all_pairwise_df[["outlier_isolate", "neighbour_isolate", "mash_host_dist"]],
+        all_pairwise_df[["outlier_isolate", "neighbour_isolate", "wgmlst_host_dist"]],
+    )
     print(
         f"  Mash pairs loaded   : {len(mash_lookup):,}\n"
         f"  wgMLST pairs loaded : {len(wgmlst_lookup):,}"
@@ -2415,45 +2534,6 @@ def spatiotemporal_hgt_analysis(
     print("\n" + "=" * 60)
     print(f"Spatiotemporal analysis complete → output/hgt_summaries/")
     print("=" * 60)
-
-
-def attach_municipalities(df_in):
-    df = df_in.copy()
-    df.MATERIAL_SUBMITTER_CITY.fillna(df.PERSON_CITY, inplace=True)
-    df.MATERIAL_SUBMITTER_PROVINCE.fillna(df.PERSON_PROVINCE, inplace=True)
-    # Load geodata and clean
-    NL_geo_key = pd.read_csv("data/WoonplaatsenCodes.csv", sep=";")
-    NL_geo_key.drop(
-        columns=[
-            "Woonplaatscode",
-            "Gemeente|Code ",
-            "Provincie|Code",
-            "Landsdeel|Naam",
-            "Landsdeel|Code",
-        ],
-        inplace=True,
-    )
-    NL_geo_key.rename(
-        columns={
-            "Gemeente|Naam ": "MATERIAL_SUBMITTER_MUNICIPALITY",
-            "Woonplaatsen": "MATERIAL_SUBMITTER_CITY",
-            "Provincie|Naam": "MATERIAL_SUBMITTER_PROVINCE",
-        },
-        inplace=True,
-    )
-    NL_geo_key["MATERIAL_SUBMITTER_MUNICIPALITY"].replace(
-        " ", "_", regex=True, inplace=True
-    )
-
-    # merge with incoming data
-    df = pd.merge(
-        df,
-        NL_geo_key,
-        on=["MATERIAL_SUBMITTER_CITY", "MATERIAL_SUBMITTER_PROVINCE"],
-        how="left",
-    )
-
-    return df
 
 
 # ---------------------------------------------------------
@@ -2533,8 +2613,16 @@ def bin_post_hoc(df_in):
     spatiotemporal_hgt_analysis(
         summary_df,
         plasmid_df,
-        "output/mash/mash_distances.tsv",
-        "output/wgmlst/all_known_distance.tab",
+        all_pairwise_df[
+            [
+                "outlier_isolate",
+                "neighbour_isolate",
+                "mash_host_dist",
+                "wgmlst_host_dist",
+                "is_bin",
+            ]
+        ],
+        # "output/wgmlst/all_known_distance.tab",
     )
 
     intro_result = run_introduction_analysis(summary_df, plasmid_df)

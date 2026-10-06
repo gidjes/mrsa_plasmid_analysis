@@ -975,7 +975,7 @@ PREVALENCE_BIN_DAYS = 365
 # ============================================================
 
 
-def geographic_dispersion(summary_df, plasmid_df_ann, prefix):
+def geographic_dispersion(summary_df, plasmid_df_ann):
     """
     For every bin, compute geographic dispersion metrics:
       n_municipalities     : distinct municipalities among members
@@ -1071,7 +1071,7 @@ def geographic_dispersion(summary_df, plasmid_df_ann, prefix):
                 "older circulating plasmid backbones."
             )
 
-    out_dir = f"output/hgt_summaries/{prefix}"
+    out_dir = f"output/hgt_summaries"
     os.makedirs(out_dir, exist_ok=True)
     disp_df.to_csv(f"{out_dir}/bin_geographic_dispersion.csv", sep=";", index=False)
     print("\n→ bin_geographic_dispersion.csv")
@@ -1083,7 +1083,7 @@ def geographic_dispersion(summary_df, plasmid_df_ann, prefix):
 # ============================================================
 
 
-def postintroduction_establishment(candidates_df, plasmid_df_ann, prefix):
+def postintroduction_establishment(candidates_df, plasmid_df_ann):
     """
     For each naive-recipient introduction candidate, track isolates
     of (cluster, recipient_ST) over time AFTER bin_intro_date.
@@ -1135,7 +1135,7 @@ def postintroduction_establishment(candidates_df, plasmid_df_ann, prefix):
     if naive.empty:
         print("  No naive-recipient candidates — skipping.")
         empty = pd.DataFrame()
-        out_dir = f"output/hgt_summaries/{prefix}"
+        out_dir = f"output/hgt_summaries"
         os.makedirs(out_dir, exist_ok=True)
         empty.to_csv(
             f"{out_dir}/postintroduction_establishment.csv", sep=";", index=False
@@ -1252,7 +1252,7 @@ def postintroduction_establishment(candidates_df, plasmid_df_ann, prefix):
                 f"  Median establishment rate (established only): {med_rate:.2f} isolates/year"
             )
 
-    out_dir = f"output/hgt_summaries/{prefix}"
+    out_dir = f"output/hgt_summaries"
     os.makedirs(out_dir, exist_ok=True)
     estab_df.to_csv(
         f"{out_dir}/postintroduction_establishment.csv", sep=";", index=False
@@ -1305,7 +1305,7 @@ def _prevalence_timeseries(
     return ts, rho, p
 
 
-def gene_prevalence_trajectory(candidates_df, plasmid_df_ann, prefix):
+def gene_prevalence_trajectory(candidates_df, plasmid_df_ann):
     """
     For each naive-recipient introduction candidate with ≥1 novel or
     rare gene (pre-introduction), track prevalence of those genes
@@ -1334,7 +1334,7 @@ def gene_prevalence_trajectory(candidates_df, plasmid_df_ann, prefix):
 
     if naive.empty:
         print("  No naive-recipient candidates — skipping.")
-        out_dir = f"output/hgt_summaries/{prefix}"
+        out_dir = f"output/hgt_summaries"
         os.makedirs(out_dir, exist_ok=True)
         pd.DataFrame().to_csv(
             f"{out_dir}/gene_prevalence_trajectory.csv", sep=";", index=False
@@ -1471,7 +1471,7 @@ def gene_prevalence_trajectory(candidates_df, plasmid_df_ann, prefix):
                 ].to_string(index=False)
             )
 
-    out_dir = f"output/hgt_summaries/{prefix}"
+    out_dir = f"output/hgt_summaries"
     os.makedirs(out_dir, exist_ok=True)
     traj_df.to_csv(f"{out_dir}/gene_prevalence_trajectory.csv", sep=";", index=False)
     long_df.to_csv(
@@ -1484,7 +1484,7 @@ def gene_prevalence_trajectory(candidates_df, plasmid_df_ann, prefix):
 # ============================================================
 # COORDINATOR
 # ============================================================
-def run_postintroduction_dynamics(summary_df, plasmid_df_ann, candidates_df, prefix):
+def run_postintroduction_dynamics(summary_df, plasmid_df_ann, candidates_df):
     """
     Entry point. Call after run_introduction_analysis() in
     aggregate_and_report(), passing its returned candidates_df and
@@ -1500,13 +1500,12 @@ def run_postintroduction_dynamics(summary_df, plasmid_df_ann, candidates_df, pre
     candidates_df   : output of run_introduction_analysis()["candidates_df"]
                        (must include novel_genes_preintro / rare_genes_preintro
                        from score_gene_novelty, and bin_intro_date)
-    prefix          : output subdirectory prefix
     """
     print("\n" + "=" * 60)
     print("POST-INTRODUCTION DYNAMICS")
     print("=" * 60)
 
-    disp_df = geographic_dispersion(summary_df, plasmid_df_ann, prefix)
+    disp_df = geographic_dispersion(summary_df, plasmid_df_ann)
 
     if candidates_df is None or candidates_df.empty:
         print(
@@ -1515,11 +1514,11 @@ def run_postintroduction_dynamics(summary_df, plasmid_df_ann, candidates_df, pre
         )
         return {"dispersion_df": disp_df}
 
-    estab_df = postintroduction_establishment(candidates_df, plasmid_df_ann, prefix)
-    traj_df, long_df = gene_prevalence_trajectory(candidates_df, plasmid_df_ann, prefix)
+    estab_df = postintroduction_establishment(candidates_df, plasmid_df_ann)
+    traj_df, long_df = gene_prevalence_trajectory(candidates_df, plasmid_df_ann)
 
     print("\n" + "=" * 60)
-    print(f"Post-introduction dynamics complete → output/hgt_summaries/{prefix}/")
+    print(f"Post-introduction dynamics complete → output/hgt_summaries/")
     print("=" * 60)
 
     return {
