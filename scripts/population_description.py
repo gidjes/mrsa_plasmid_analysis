@@ -8,7 +8,7 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 from statsmodels.stats.multitest import multipletests
 
-from scipy.stats import kruskal, mannwhitneyu, chi2_contingency, fisher_exact, chi2
+from scipy.stats import mannwhitneyu, chi2_contingency
 from scipy.spatial.distance import pdist, squareform
 from skbio.stats.distance import (
     DistanceMatrix,
@@ -18,9 +18,11 @@ from skbio.stats.distance import (
 from skbio.stats.ordination import pcoa
 
 import config
-from helper_functions import clean_plasmid_df
 import plotting_functions as plot
 
+# ---------------------------------------------------------
+# 3.0.0 Configuration
+# ---------------------------------------------------------
 CLUSTER_COL = config.CLUSTER_COL
 
 

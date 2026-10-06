@@ -8,11 +8,12 @@ from pathlib import Path
 from functools import partial
 from multiprocessing import Pool
 from helper_functions import lsf_hpcify_cmd
+
 import config
 from plotting_functions import plot_single_tangle
 
 # ---------------------------------------------------------
-# 5.0 Declare config variables
+# 5.0 Configuration
 # ---------------------------------------------------------
 ISOLATE_COL = config.ISOLATE_COL
 ST_COL = config.ST_COL
@@ -21,11 +22,24 @@ ORIGIN_COL = config.ORIGIN_COL
 MOBILITY_COL = config.MOBILITY_COL
 CLUSTER_COL = config.CLUSTER_COL
 
+NJOBS = config.NJOBS
+
 
 # ---------------------------------------------------------
 # 5.1.1 Run mashtree for a single cluster
 # ---------------------------------------------------------
-def run_mashtree(cluster, df_in):
+def run_mashtree(cluster: str, df_in: pd.DataFrame):
+    """
+    Runs mashtree for the plasmids and isolates of a cluster
+
+    Parameters
+    ----------
+    cluster : str
+        cluster id for which to calculate mash distances
+        and create the trees
+    df_in : pd.DataFrame
+        Dataframe containing plasmids and their associated cluster
+    """
     df = df_in.copy()
     fastas = df["Plasmid"].loc[df[CLUSTER_COL] == cluster].to_list()
     outdir = f"output/mashtree/{cluster}"
@@ -68,13 +82,21 @@ def run_mashtree(cluster, df_in):
 # ---------------------------------------------------------
 # 5.1.2 Run mashtree in parallel for each cluster
 # ---------------------------------------------------------
-def mashtree_builder(df_in: pd.DataFrame, n_jobs: int, cluster_col: str):
+def mashtree_builder(df_in: pd.DataFrame):
+    """
+    Running function to set up run_mashtree for each cluster
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Dataframe with plasmids and clusters
+    """
     df = df_in.copy()
     os.makedirs("logs", exist_ok=True)
 
-    clusters = df[cluster_col].unique()
+    clusters = df[CLUSTER_COL].unique()
 
-    with Pool(processes=n_jobs, maxtasksperchild=1) as pool:
+    with Pool(processes=NJOBS, maxtasksperchild=1) as pool:
         pool.map(partial(run_mashtree, df_in=df), clusters)
 
 
@@ -82,15 +104,18 @@ def mashtree_builder(df_in: pd.DataFrame, n_jobs: int, cluster_col: str):
 # 5.1.3 convert wgMLST assignments to distance matrices
 # ---------------------------------------------------------
 def wgMLST_converter():
+    """
+    Convert the wgMLST output into distance matrices
+    """
     os.makedirs("output/wgmlst/", exist_ok=True)
 
-    cmd_sau = "cgmlst-dists -j 10 -x 3000 data/wgMLST_sau.txt > output/wgmlst/wgMLST_sau_dist.tab"
+    cmd_sau = f"cgmlst-dists -j {NJOBS} -x 3000 data/wgMLST_sau.txt > output/wgmlst/wgMLST_sau_dist.tab"
     subprocess.call(
         cmd_sau,
         shell=True,
     )
 
-    cmd_sar = "cgmlst-dists -j 10 -x 3000 data/wgMLST_sar.txt > output/wgmlst/wgMLST_sar_dist.tab"
+    cmd_sar = f"cgmlst-dists -j {NJOBS} -x 3000 data/wgMLST_sar.txt > output/wgmlst/wgMLST_sar_dist.tab"
     subprocess.call(
         cmd_sar,
         shell=True,
@@ -98,9 +123,80 @@ def wgMLST_converter():
 
 
 # ---------------------------------------------------------
-# 5.1.4 Create wgMLST matrices by cluster
+# 5.1.4 Create wgMLST matrices for a cluster
+# ---------------------------------------------------------
+def wgMLST_per_cluster(
+    df_in: pd.DataFrame, cluster_id: str, sau: pd.DataFrame, sar: pd.DataFrame
+):
+    """
+    Create the wgMLST istance matrix for a specifc cluster
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Input dataframe containing the plasmids associated isolate
+        and their associated clusters
+    cluster_id : str
+        Cluster id to create the matrix for
+    sau : pd.DataFrame
+        S. aureus distance matrix
+    sar : pd.DataFrame
+        S. argenteus distance matrix
+    """
+    df = df_in.copy()
+
+    # Get isolate IDs belonging to this cluster
+    isolate_ids = (
+        df.loc[df[CLUSTER_COL] == cluster_id, "Parent"].dropna().unique().tolist()
+    )
+
+    # 4. Select only isolates from this cluster
+    sau_isolates = [x for x in isolate_ids if x in sau.index]
+    sar_isolates = [x for x in isolate_ids if x in sar.index]
+
+    sau_cluster = sau.loc[sau_isolates, sau_isolates]
+    sar_cluster = sar.loc[sar_isolates, sar_isolates]
+
+    # 5. Combine the two matrices
+    # The union contains all isolates in the cluster from either species.
+    all_isolates = sau_isolates + [x for x in sar_isolates if x not in sau_isolates]
+
+    combined = pd.DataFrame(index=all_isolates, columns=all_isolates, dtype=float)
+
+    # Put S. aureus distances into the combined matrix
+    if not sau_cluster.empty:
+        combined.loc[sau_isolates, sau_isolates] = sau_cluster
+
+    # Put S. argenteus distances into the combined matrix
+    if not sar_cluster.empty:
+        combined.loc[sar_isolates, sar_isolates] = sar_cluster
+
+    # 6. Save the cluster-specific matrix
+    output_file = f"output/wgmlst/{cluster_id}_distances.tab"
+    combined.to_csv(output_file, sep="\t", na_rep="")
+
+    print(
+        f"Cluster {cluster_id}: "
+        f"{len(all_isolates)} isolates "
+        f"({len(sau_isolates)} S. aureus, "
+        f"{len(sar_isolates)} S. argenteus) -> {output_file}"
+    )
+
+
+# ---------------------------------------------------------
+# 5.1.5 Runner to create wgMLST matrices by cluster
 # ---------------------------------------------------------
 def wgMLST_prepper(df_in: pd.DataFrame):
+    """
+    Runner function to convert wgMLST outputs into distance matrices
+    for each cluster
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Input dataframe to collect isolates associated with each plasmid
+        cluster
+    """
     df = df_in.copy()
 
     # Input files
@@ -122,50 +218,29 @@ def wgMLST_prepper(df_in: pd.DataFrame):
     sar.index = sar.index.astype(str)
     sar.columns = sar.columns.astype(str)
 
-    # 3-6. Process each cluster
-    for cluster_id in cluster_ids:
-        # Get isolate IDs belonging to this cluster
-        isolate_ids = (
-            df.loc[df[CLUSTER_COL] == cluster_id, "Parent"].dropna().unique().tolist()
-        )
-
-        # 4. Select only isolates from this cluster
-        sau_isolates = [x for x in isolate_ids if x in sau.index]
-        sar_isolates = [x for x in isolate_ids if x in sar.index]
-
-        sau_cluster = sau.loc[sau_isolates, sau_isolates]
-        sar_cluster = sar.loc[sar_isolates, sar_isolates]
-
-        # 5. Combine the two matrices
-        # The union contains all isolates in the cluster from either species.
-        all_isolates = sau_isolates + [x for x in sar_isolates if x not in sau_isolates]
-
-        combined = pd.DataFrame(index=all_isolates, columns=all_isolates, dtype=float)
-
-        # Put S. aureus distances into the combined matrix
-        if not sau_cluster.empty:
-            combined.loc[sau_isolates, sau_isolates] = sau_cluster
-
-        # Put S. argenteus distances into the combined matrix
-        if not sar_cluster.empty:
-            combined.loc[sar_isolates, sar_isolates] = sar_cluster
-
-        # 6. Save the cluster-specific matrix
-        output_file = f"output/wgmlst/{cluster_id}_distances.tab"
-        combined.to_csv(output_file, sep="\t", na_rep="")
-
-        print(
-            f"Cluster {cluster_id}: "
-            f"{len(all_isolates)} isolates "
-            f"({len(sau_isolates)} S. aureus, "
-            f"{len(sar_isolates)} S. argenteus) -> {output_file}"
-        )
+    with Pool(processes=NJOBS, maxtasksperchild=1) as pool:
+        pool.map(partial(wgMLST_per_cluster, df_in=df, sau=sau, sar=sar), cluster_ids)
 
 
 # ---------------------------------------------------------
 # 5.2.0 Helper functions
 # ---------------------------------------------------------
 def _load_mash(cluster: str, mode: str = "pls") -> pd.DataFrame:
+    """
+    Load the mash distance matrix
+
+    Parameters
+    ----------
+    cluster : str
+        cluster for which to open the file
+    mode : str, optional
+        open plasmid or chromosomal file, by default "pls"
+
+    Returns
+    -------
+    pd.DataFrame
+        Pairwise (long format) distance matrix
+    """
     path = Path(f"output/mashtree/{cluster}/{cluster}_{mode}_dist.tab")
     if not path.exists():
         return None
@@ -207,12 +282,26 @@ def _load_mash(cluster: str, mode: str = "pls") -> pd.DataFrame:
         )
     )
 
-    # mash_df = mash_df[mash_df["isolate_a"] < mash_df["isolate_b"]]
-
     return mash_df
 
 
 def _load_wgmlst(cluster: str, group: pd.DataFrame) -> pd.DataFrame:
+    """
+    Load the wgMLST distance matrix
+
+    Parameters
+    ----------
+    cluster : str
+        Cluster id for which to load the matrix
+    group : pd.DataFrame
+        Dataframe containing the analysis group
+
+    Returns
+    -------
+    pd.DataFrame
+        Pairwise (long format) distance matrix
+    """
+
     # Always load chromosome Mash
     mash_df = _load_mash(cluster, mode="chr")
     if mash_df is None:
@@ -261,18 +350,8 @@ def _load_wgmlst(cluster: str, group: pd.DataFrame) -> pd.DataFrame:
     )
 
 
-def _mash_cutoff(
-    mash_df: pd.DataFrame, quantile: float = 0.25, use_cutoff: bool = True
-) -> float:
-    if use_cutoff:
-        cutoff = float(np.quantile(mash_df["host_mash_dist"], quantile))
-        return cutoff
-    else:
-        return 0.0001
-
-
 def _extract_isolate(plasmid_series: "pd.Series | str") -> "pd.Series | int":
-    """Vectorised: '123_1' -> 123.  Also works on a plain string."""
+    """Convert plasmid ID to isolate ID"""
     if isinstance(plasmid_series, str):
         return int(plasmid_series.split("_")[0])
     return plasmid_series.str.split("_").str[0].astype(int)
@@ -286,11 +365,9 @@ def _analyse_cluster_neighbours(
     cluster_meta: pd.DataFrame,  # plasmid metadata for this cluster
     mash_df: pd.DataFrame,
     wgmlst_long: pd.DataFrame,
-    mash_cutoff: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
-    Fully vectorised replacement for the per-outlier loop.
-
+    Create the pairwise metadata comparisons
     Returns (detail_df, summary_df) for all outliers in the cluster at once.
     """
 
@@ -360,7 +437,7 @@ def _analyse_cluster_neighbours(
     # ------------------------------------------------------------------ #
     # 4. Vectorised flag columns                                          #
     # ------------------------------------------------------------------ #
-    pairs["is_bin"] = pairs["mash_plasmid_dist"] < mash_cutoff
+    pairs["is_bin"] = pairs["mash_plasmid_dist"] < 0.0001
     pairs["inter_species"] = pairs["neighbour_species"] != pairs["outlier_species"]
     pairs["same_st"] = pairs["neighbour_st"] == pairs["outlier_st"]
     pairs["inter_compartment"] = (
@@ -425,10 +502,13 @@ def _analyse_cluster_neighbours(
 
 
 # ---------------------------------------------------------
-# 5.2.2 Build bin summaroes
+# 5.2.2 Build bin summaries
 # ---------------------------------------------------------
 def _summarise_one(group: pd.DataFrame, cluster: str) -> dict:
-    """Collapse one outlier's neighbour rows into a summary dict."""
+    """
+    Summarise the pairwise analysis into a one-line summary for
+    a plasmid
+    """
     outlier_plasmid = group["outlier_plasmid"].values[0]
     binned_group = group.loc[group["is_bin"]]
 
@@ -517,12 +597,10 @@ def _summarise_one(group: pd.DataFrame, cluster: str) -> dict:
 def _build_summaries(
     detail_df: pd.DataFrame,
     all_outliers: pd.DataFrame,
-    # columns: outlier_plasmid,cluster
     cluster: str,
 ) -> pd.DataFrame:
     """
-    Produce one summary row per outlier,
-    including those with zero neighbours (which won't appear in detail_df after filtering).
+    Produce one summary row per outlier, including those with zero neighbours
     """
     rows = []
     if not detail_df.empty:
@@ -563,19 +641,13 @@ def _build_summaries(
 # ---------------------------------------------------------
 def run_nearest_neighbour_analysis(
     df_plasmids_clean: pd.DataFrame,
-    mash_quantile: float = 0.25,
-    use_cutoff: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """
     Vectorised nearest-neighbour host-distance analysis for all HGT candidates.
 
     Parameters
     ----------
-    df_plasmids_clean : full plasmid metadata (must contain ISOLATE_COL,
-                        ST_COL, SPECIES_COL, ORIGIN_COL,
-                        Standard_Cluster_mrsa)
-    mash_quantile     : quantile of within-cluster Mash distances used as
-                        neighbour cutoff (default 0.25 = lower quartile)
+    df_plasmids_clean : full plasmid metadata
 
     Returns
     -------
@@ -604,20 +676,16 @@ def run_nearest_neighbour_analysis(
                 f"    [warn] no wgMLST file for {cluster}, host distances unavailable"
             )
 
-        cutoff = _mash_cutoff(mash_df, quantile=mash_quantile, use_cutoff=use_cutoff)
-        print(f"    Mash cutoff (q{int(mash_quantile * 100)}): {cutoff:.4f}")
-
         cluster_meta = df_plasmids_clean[
             df_plasmids_clean["Standard_Cluster_mrsa"] == str(cluster)
         ].copy()
 
-        # ---- single vectorised call for the whole cluster ---- #
+        # single vectorised call for the whole cluster
         detail = _analyse_cluster_neighbours(
             outlier_plasmids=group["Plasmid"],
             cluster_meta=cluster_meta,
             mash_df=mash_df,
             wgmlst_long=wgmlst_long,
-            mash_cutoff=cutoff,
         )
 
         # Summaries — one row per outlier (including zero-neighbour ones)
@@ -637,10 +705,8 @@ def run_nearest_neighbour_analysis(
         pd.concat(all_details, ignore_index=True) if all_details else pd.DataFrame()
     )
 
+    # Build graph → connected components = dissemination bins
     if not detail_df.empty:
-        # ----------------------------------------------------------
-        # Build graph → connected components = dissemination bins
-        # ----------------------------------------------------------
         G = nx.Graph()
 
         mask = detail_df["is_bin"]
@@ -677,18 +743,26 @@ def run_nearest_neighbour_analysis(
 # 5.2.2 Build bin summaroes
 # ---------------------------------------------------------
 def run_nearest_neighbours_analysis_cluster(
-    df_plasmids_clean, cluster_id, cluster_col, cutoff: bool = True
+    df_plasmids_clean: pd.DataFrame, cluster_id: str
 ):
+    """
+    Create the bins of near-identical plasmids and summarise
+    bin metadata distribution
 
+    Parameters
+    ----------
+    df_plasmids_clean : pd.DataFrame
+        Plasmid metadata dataframe
+    cluster_id : str
+        Cluster for which to run the analysis
+    """
     os.makedirs(f"output/hgt_results/", exist_ok=True)
     os.makedirs(f"results/outlier_tangles/", exist_ok=True)
 
-    df_cluster = df_plasmids_clean.loc[df_plasmids_clean[cluster_col] == cluster_id]
+    df_cluster = df_plasmids_clean.loc[df_plasmids_clean[CLUSTER_COL] == cluster_id]
 
     nn_summary, nn_detail = run_nearest_neighbour_analysis(
         df_plasmids_clean=df_cluster,
-        mash_quantile=0.01,
-        use_cutoff=cutoff,
     )
 
     nn_summary.to_csv(
@@ -700,7 +774,7 @@ def run_nearest_neighbours_analysis_cluster(
 
     # fix/resolve parent column
     df_plasmids_clean_cluster = df_plasmids_clean.loc[
-        df_plasmids_clean[cluster_col] == cluster_id
+        df_plasmids_clean[CLUSTER_COL] == cluster_id
     ]
     nn_summary_cluster = nn_summary.loc[nn_summary[CLUSTER_COL] == cluster_id]
 
@@ -720,12 +794,8 @@ def run_nearest_neighbours_analysis_cluster(
 
             if d < 15:
                 return "Clonal"
-            # elif d < 500:
-            #     return "close genogroup"
             elif d < 1000:
                 return "Same genogroup"
-            # elif d < 2000:
-            #     return "distinct lineage"
             else:
                 return "Distant lineages"
 
@@ -739,8 +809,6 @@ def run_nearest_neighbours_analysis_cluster(
                 return "Clonal"
             elif d < 0.0021892:
                 return "Same genogroup"
-            # elif d < 0.01:
-            #     return "distinct lineage"
             else:
                 return "Distant lineages"
 
@@ -753,9 +821,7 @@ def run_nearest_neighbours_analysis_cluster(
             categories=[
                 "Clonal",
                 "Same genogroup",
-                # "wide genogroup",
                 "Distant lineages",
-                # "maximal distant lineages",
             ],
             ordered=True,
         )
@@ -768,7 +834,6 @@ def run_nearest_neighbours_analysis_cluster(
         return df
 
     nn_summary_cluster = classify_distance(nn_summary_cluster)
-    print(nn_summary_cluster)
 
     tangle_df = df_plasmids_clean_cluster.merge(
         nn_summary_cluster,
@@ -792,16 +857,23 @@ def run_nearest_neighbours_analysis_cluster(
 # 5.2.3 Perfrom all the binning operations
 # ---------------------------------------------------------
 def run_nn_analysis(df_in: pd.DataFrame):
-    cluster_col = CLUSTER_COL
+    """
+    Runner function for near-identical bin analysis
+    for each cluster
+
+    Parameters
+    ----------
+    df_in : pd.DataFrame
+        Plasmid metadata
+    """
     df = df_in.copy()
+    clusters = df[CLUSTER_COL].unique().tolist()
 
-    clusters = df[cluster_col].unique().tolist()
-    # clusters.remove("-1")
-    # clusters.remove("-")
-
-    for cluster in clusters:
-        print(f"Running nearest neighbours for {cluster}\n")
-        run_nearest_neighbours_analysis_cluster(df, cluster, cluster_col, False)
+    with Pool(processes=NJOBS, maxtasksperchild=1) as pool:
+        pool.map(
+            partial(run_nearest_neighbours_analysis_cluster, df_plasmids_clean=df),
+            clusters,
+        )
 
 
 if __name__ == "__main__":
