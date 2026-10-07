@@ -123,6 +123,7 @@ def mrsa_plasmid_analysis():
     # nearest_neighbour_analysis.run_nn_analysis(plasmid_df)
 
     # Run sequence-level analysis
+    os.makedirs("results/bin_dynamics", exist_ok=True)
     bin_dynamics.bin_post_hoc(plasmid_df)
 
 
