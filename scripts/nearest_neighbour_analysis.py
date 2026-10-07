@@ -841,9 +841,14 @@ def run_nearest_neighbours_analysis_cluster(
         right_on=["outlier_plasmid", "Standard_Cluster_mrsa"],
     )
 
+    subprocess.call(
+        f"Rscript scripts/annotated_tree.R {cluster_id}",
+        shell=True,
+    )
+
     plot_single_tangle(
         tangle_df,
-        cluster_id,
+        str(cluster_id),
         "bin_id",
         ST_COL,
         "group_width",

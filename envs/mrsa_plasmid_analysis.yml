@@ -9,5 +9,6 @@ dependencies:
   - cgmlst-dists
   - python=3.10
   - pip
+  - r-essentials
   - pip:
       - -r ../requirements.txt

@@ -2009,4 +2009,11 @@ def plot_single_tangle(
         # bbox_inches="tight",
         dpi=600,
     )
+    if cluster_id == "43":
+        plt.savefig(
+            f"results/figures/figure7_{cluster_id}_bins_tanglegram.png",
+            # bbox_inches="tight",
+            dpi=600,
+        )
+
     plt.clf()

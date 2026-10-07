@@ -16,71 +16,39 @@ CLUSTER_COL = config.CLUSTER_COL
 def mrsa_plasmid_analysis():
     """
     Running function for all components included in the paper:
-    1. Verify all required files exist
+    1. Open data
     2. Mge-cluster bootstrap to create scheme
     3. General population statistics/description
     4. Cluster statistics/description
     5. Nearly-identical neighbour analysis
     """
     # ---------------------------------------------------------
-    # 1. Verify fastas + metadata
+    # 1. Open data
     # ---------------------------------------------------------
     # Collect metadata and fasta sample lists
     metadata_df = pd.read_csv("data/metadata.csv", encoding="ISO-8859-1", sep=";")
-    fastas = os.listdir("fastas")
-    iso_fastas = os.listdir("fastas_chr")
 
-    # # Remove extension
-    # files = [x.split(".fasta")[0] for x in fastas]
-    # iso_files = [int(x.split(".fasta")[0]) for x in iso_fastas]
+    # Make necessary output directories
+    os.makedirs("results/figures", exist_ok=True)
+    os.makedirs("results/tables", exist_ok=True)
 
-    # # Find missing items between the lists
-    # missing_fastas = [x for x in fastas if x not in metadata_df["Plasmid"].values]
-    # missing_fastas += [x for x in iso_fastas if x not in metadata_df["Parent"].unique()]
+    # ---------------------------------------------------------
+    # 2. mge-bootstrap -> create scheme
+    # ---------------------------------------------------------
+    # Make required directories
+    os.makedirs("logs/mge/", exist_ok=True)
+    os.makedirs("mge_bootstrap/", exist_ok=True)
 
-    # missing_metadata = [x for x in metadata_df["Plasmid"].values if x not in files]
-    # missing_metadata += [
-    #     x for x in metadata_df["Parent"].unique() if x not in iso_files
-    # ]
+    # Run the bootstrap optimiser
+    mge_bootstrap.create_input_file()
+    mge_bootstrap.bootstrap_mge_cluster()
 
-    # # Report completeness
-    # if len(missing_fastas) > 0:
-    #     print("All fasta files have corresponding metadata")
-    #     print("\n")
-    # else:
-    #     print(f"Missing metadata for {len(missing_fastas)} files:")
-    #     print(missing_fastas)
-    #     print("\n")
+    # Get optimised paramter values
+    perplexity = mge_bootstrap.bootstrap_rand("perplexity")
+    clustersize = mge_bootstrap.bootstrap_rand("clustersize")
 
-    # if len(missing_metadata) > 0:
-    #     print("All metadata have corresponding fasta files")
-    #     print("\n")
-    # else:
-    #     print(f"Missing fastas for {len(missing_metadata)} plasmids:")
-    #     print(missing_metadata)
-    #     print("\n")
-
-    # # Make necessary output directories
-    # os.makedirs("results/figures", exist_ok=True)
-    # os.makedirs("results/tables", exist_ok=True)
-
-    # # ---------------------------------------------------------
-    # # 2. mge-bootstrap -> create scheme
-    # # ---------------------------------------------------------
-    # # Make required directories
-    # os.makedirs("logs/mge/", exist_ok=True)
-    # os.makedirs("mge_bootstrap/", exist_ok=True)
-
-    # # Run the bootstrap optimiser
-    # mge_bootstrap.create_input_file()
-    # mge_bootstrap.bootstrap_mge_cluster()
-
-    # # Get optimised paramter values
-    # perplexity = mge_bootstrap.bootstrap_rand("perplexity")
-    # clustersize = mge_bootstrap.bootstrap_rand("clustersize")
-
-    # # Perform optimised mge-cluster
-    # mge_bootstrap.optimised_mge(perplexity, clustersize)
+    # Perform optimised mge-cluster
+    mge_bootstrap.optimised_mge(perplexity, clustersize)
 
     # ---------------------------------------------------------
     # 3. Population description
@@ -97,30 +65,30 @@ def mrsa_plasmid_analysis():
     metadata_df = clean_plasmid_df(metadata_df, clustering_df, False)
     plasmid_df.to_csv("data/merged_data.csv", sep=";", index=False)
 
-    # # Run population-level analysis
-    # population_description.dataset_overview(plasmid_df, metadata_df)
+    # Run population-level analysis
+    population_description.dataset_overview(plasmid_df, metadata_df)
 
-    # # ---------------------------------------------------------
-    # # 4. Scheme / cluster-level description
-    # # ---------------------------------------------------------
-    # # Run cluster-level analysis
-    # population_description.cluster_overview(plasmid_df, metadata_df)
+    # ---------------------------------------------------------
+    # 4. Scheme / cluster-level description
+    # ---------------------------------------------------------
+    # Run cluster-level analysis
+    population_description.cluster_overview(plasmid_df, metadata_df)
 
-    # # ---------------------------------------------------------
-    # # 5. Near-identical plasmid bin analysis
-    # # ---------------------------------------------------------
-    # # Calculate mash distances and create phylogenetic trees
-    # os.makedirs("output/mashtree", exist_ok=True)
-    # nearest_neighbour_analysis.mashtree_builder(plasmid_df)
+    # ---------------------------------------------------------
+    # 5. Near-identical plasmid bin analysis
+    # ---------------------------------------------------------
+    # Calculate mash distances and create phylogenetic trees
+    os.makedirs("output/mashtree", exist_ok=True)
+    nearest_neighbour_analysis.mashtree_builder(plasmid_df)
 
-    # # Create the wgMLST distance files
-    # os.makedirs("output/wgmlst", exist_ok=True)
-    # nearest_neighbour_analysis.wgMLST_converter()
-    # nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
+    # Create the wgMLST distance files
+    os.makedirs("output/wgmlst", exist_ok=True)
+    nearest_neighbour_analysis.wgMLST_converter()
+    nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
 
-    # # Calculate mash distances and create phylogenetic trees
-    # os.makedirs("results/trees/outlier_tangles/", exist_ok=True)
-    # nearest_neighbour_analysis.run_nn_analysis(plasmid_df)
+    # Calculate mash distances and create phylogenetic trees
+    os.makedirs("results/trees/outlier_tangles/", exist_ok=True)
+    nearest_neighbour_analysis.run_nn_analysis(plasmid_df)
 
     # Run sequence-level analysis
     os.makedirs("results/bin_dynamics", exist_ok=True)

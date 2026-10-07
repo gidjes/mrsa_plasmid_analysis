@@ -571,6 +571,11 @@ plot_cluster_tree <- function(cluster,
   ggsave(png_path, plot = tree_full, width = width, height = height, units = units)
   message(sprintf("Saved: %s and %s", svg_path, png_path))
 
+  if (cluster == 11) {
+    png_path <- file.path("results/figures/figure6_cluster_11_tree.png")
+    ggsave(png_path, plot = tree_full, width = width, height = height, units = units)
+  }
+
   tree_full
 }
 
@@ -583,17 +588,13 @@ plot_cluster_tree <- function(cluster,
 # Sourcing the file (e.g. `source("plot_cluster_tree.R")`) will NOT trigger
 # this block, so you can safely source it and call plot_cluster_tree()
 # yourself with custom arguments.
-
 if (sys.nframe() == 0 && !interactive()) {
   args <- commandArgs(trailingOnly = TRUE)
   if (length(args) < 1) {
-    stop("Usage: Rscript plot_cluster_tree.R <cluster_id>  e.g. Rscript plot_cluster_tree.R 56")
+    stop("Usage: Rscript scripts/annotated_tree.R <cluster_id>  e.g. Rscript scripts/annotated_tree.R 56")
   }
   cluster_id <- args[1]
 
   plasmid_df <- load_plasmid_data("data/merged_data.csv")
   plot_cluster_tree(cluster_id, plasmid_df)
 }
-# for (cluster_id in 0:53) {
-#   plot_cluster_tree(cluster_id, plasmid_df)
-# }
