@@ -60,27 +60,27 @@ def mrsa_plasmid_analysis():
     #     print(missing_metadata)
     #     print("\n")
 
-    # Make necessary output directories
-    os.makedirs("results/figures", exist_ok=True)
-    os.makedirs("results/tables", exist_ok=True)
+    # # Make necessary output directories
+    # os.makedirs("results/figures", exist_ok=True)
+    # os.makedirs("results/tables", exist_ok=True)
 
-    # ---------------------------------------------------------
-    # 2. mge-bootstrap -> create scheme
-    # ---------------------------------------------------------
-    # Make required directories
-    os.makedirs("logs/mge/", exist_ok=True)
-    os.makedirs("mge_bootstrap/", exist_ok=True)
+    # # ---------------------------------------------------------
+    # # 2. mge-bootstrap -> create scheme
+    # # ---------------------------------------------------------
+    # # Make required directories
+    # os.makedirs("logs/mge/", exist_ok=True)
+    # os.makedirs("mge_bootstrap/", exist_ok=True)
 
-    # Run the bootstrap optimiser
-    mge_bootstrap.create_input_file()
-    mge_bootstrap.bootstrap_mge_cluster()
+    # # Run the bootstrap optimiser
+    # mge_bootstrap.create_input_file()
+    # mge_bootstrap.bootstrap_mge_cluster()
 
-    # Get optimised paramter values
-    perplexity = mge_bootstrap.bootstrap_rand("perplexity")
-    clustersize = mge_bootstrap.bootstrap_rand("clustersize")
+    # # Get optimised paramter values
+    # perplexity = mge_bootstrap.bootstrap_rand("perplexity")
+    # clustersize = mge_bootstrap.bootstrap_rand("clustersize")
 
-    # Perform optimised mge-cluster
-    mge_bootstrap.optimised_mge(perplexity, clustersize)
+    # # Perform optimised mge-cluster
+    # mge_bootstrap.optimised_mge(perplexity, clustersize)
 
     # ---------------------------------------------------------
     # 3. Population description
@@ -97,30 +97,30 @@ def mrsa_plasmid_analysis():
     metadata_df = clean_plasmid_df(metadata_df, clustering_df, False)
     plasmid_df.to_csv("data/merged_data.csv", sep=";", index=False)
 
-    # Run population-level analysis
-    population_description.dataset_overview(plasmid_df, metadata_df)
+    # # Run population-level analysis
+    # population_description.dataset_overview(plasmid_df, metadata_df)
 
-    # ---------------------------------------------------------
-    # 4. Scheme / cluster-level description
-    # ---------------------------------------------------------
-    # Run cluster-level analysis
-    population_description.cluster_overview(plasmid_df, metadata_df)
+    # # ---------------------------------------------------------
+    # # 4. Scheme / cluster-level description
+    # # ---------------------------------------------------------
+    # # Run cluster-level analysis
+    # population_description.cluster_overview(plasmid_df, metadata_df)
 
-    # ---------------------------------------------------------
-    # 5. Nearly-identical plasmid analysis
-    # ---------------------------------------------------------
-    # Calculate mash distances and create phylogenetic trees
-    os.makedirs("output/mashtree", exist_ok=True)
-    nearest_neighbour_analysis.mashtree_builder(plasmid_df)
+    # # ---------------------------------------------------------
+    # # 5. Near-identical plasmid bin analysis
+    # # ---------------------------------------------------------
+    # # Calculate mash distances and create phylogenetic trees
+    # os.makedirs("output/mashtree", exist_ok=True)
+    # nearest_neighbour_analysis.mashtree_builder(plasmid_df)
 
-    # Create the wgMLST distance files
-    os.makedirs("output/wgmlst", exist_ok=True)
-    nearest_neighbour_analysis.wgMLST_converter()
-    nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
+    # # Create the wgMLST distance files
+    # os.makedirs("output/wgmlst", exist_ok=True)
+    # nearest_neighbour_analysis.wgMLST_converter()
+    # nearest_neighbour_analysis.wgMLST_prepper(plasmid_df)
 
-    # Calculate mash distances and create phylogenetic trees
-    os.makedirs("results/trees/outlier_tangles/", exist_ok=True)
-    nearest_neighbour_analysis.run_nn_analysis(plasmid_df)
+    # # Calculate mash distances and create phylogenetic trees
+    # os.makedirs("results/trees/outlier_tangles/", exist_ok=True)
+    # nearest_neighbour_analysis.run_nn_analysis(plasmid_df)
 
     # Run sequence-level analysis
     bin_dynamics.bin_post_hoc(plasmid_df)
