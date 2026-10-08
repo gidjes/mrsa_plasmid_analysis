@@ -775,6 +775,8 @@ def run_nearest_neighbours_analysis_cluster(
         nn_summary = pd.read_csv(
             f"output/hgt_results/nn_summary_{cluster_id}.csv", sep=";"
         )
+        nn_summary[CLUSTER_COL] = nn_summary[CLUSTER_COL].astype(str)
+
 
     # fix/resolve parent column
     df_plasmids_clean_cluster = df_plasmids_clean.loc[
