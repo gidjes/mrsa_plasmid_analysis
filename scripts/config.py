@@ -35,38 +35,38 @@ SUBMITTER_TYPE = "MATERIAL_SUBMITTER_TYPE"
 
 # Palettes
 SPECIES_PALETTE = {
-    r"$\it{Staphyloccocus}$ $\it{aureus}$": "#007bc7",
-    r"$\it{Staphyloccocus}$ $\it{argenteus}$": "#C6C83A",
+    r"$\it{Staphyloccocus}$ $\it{aureus}$": "#0072B2",
+    r"$\it{Staphyloccocus}$ $\it{argenteus}$": "#F0E442",
 }
 ORIGIN_PALETTE = {
-    "LA-MRSA": "#1baa62",
-    "HA-MRSA": "#d52b1e",
-    "CA-MRSA": "#007bc7",
+    "LA-MRSA": "#009E73",
+    "HA-MRSA": "#D55E00",
+    "CA-MRSA": "#0072B2",
     "MSSA": "#737070",
-    r"$\it{S. argenteus}$": "#C6C83A",
+    r"$\it{S. argenteus}$": "#F0E442",
 }
 ORIGIN_PALETTE_FULL = {
-    "Livestock-associated\nMRSA": "#1baa62",
-    "Hopsital-associated\nMRSA": "#d52b1e",
-    "Community-associated\nMRSA": "#007bc7",
+    "Livestock-associated\nMRSA": "#009E73",
+    "Hopsital-associated\nMRSA": "#D55E00",
+    "Community-associated\nMRSA": "#0072B2",
     r"Sensitive $\it{S. aureus}$": "#737070",
-    r"$\it{S. argenteus}$": "#C6C83A",
+    r"$\it{S. argenteus}$": "#F0E442",
 }
 ORIGIN_PALETTE_SHORT = {
-    "LA-MRSA": "#1baa62",
-    "HA-MRSA": "#d52b1e",
-    "CA-MRSA": "#007bc7",
+    "LA-MRSA": "#009E73",
+    "HA-MRSA": "#D55E00",
+    "CA-MRSA": "#0072B2",
     "MSSA": "#737070",
-    "Sar": "#C6C83A",
+    "Sar": "#F0E442",
 }
 
 MOBILITY_PALETTE = {
-    "non-mobilizable": "#F1AD41",
-    "mobilizable": "#D258EB",
+    "non-mobilizable": "#E69F00",
+    "mobilizable": "#BB297A",
     "conjugative": "#2BC985",
 }
 CLONALITY_PALETTE = {
-    "Clonal": "#11D027",
-    "Same genogroup": "#1BBFC2",
-    "Distant lineages": "#A90C84",
+    "Clonal": "#009E73",
+    "Same genogroup": "#56B4E9",
+    "Distant lineages": "#BB297A",
 }

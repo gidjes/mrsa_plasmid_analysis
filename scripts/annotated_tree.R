@@ -358,20 +358,20 @@ plot_cluster_tree <- function(cluster,
   )
 
   GENE_PALETTE <- c(
-    "amr" = "#de584e",
-    "virulence" = "#32c8d3",
+    "amr" = "#BB297A",
+    "virulence" = "#56B4E9",
     "metal" = "#9B9B9B",
-    "biocide" = "#2de920"
+    "biocide" = "#009E73"
   )
 
   gene_palette <- GENE_PALETTE
 
   ORIGIN_PALETTE <- c(
-    "LA-MRSA" = "#1baa62",
-    "HA-MRSA" = "#d52b1e",
-    "CA-MRSA" = "#007bc7",
+    "LA-MRSA" = "#009E73",
+    "HA-MRSA" = "#D55E00",
+    "CA-MRSA" = "#0072B2",
     "MSSA" = "#737070",
-    "Sar" = "#C6C83A"
+    "Sar" = "#F0E442"
   )
 
   origin_palette <- ORIGIN_PALETTE
@@ -571,9 +571,11 @@ plot_cluster_tree <- function(cluster,
   ggsave(png_path, plot = tree_full, width = width, height = height, units = units)
   message(sprintf("Saved: %s and %s", svg_path, png_path))
 
-  if (cluster == 11) {
+  if (cluster == "11") {
     png_path <- file.path("results/figures/figure6_cluster_11_tree.png")
+    svg_path <- file.path("results/figures/figure6_cluster_11_tree.svg")
     ggsave(png_path, plot = tree_full, width = width, height = height, units = units)
+    ggsave(svg_path, plot = tree_full, width = width, height = height, units = units)
   }
 
   tree_full

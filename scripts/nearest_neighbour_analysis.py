@@ -125,7 +125,7 @@ def wgMLST_converter():
 # 5.1.4 Create wgMLST matrices for a cluster
 # ---------------------------------------------------------
 def wgMLST_per_cluster(
-    df_in: pd.DataFrame, cluster_id: str, sau: pd.DataFrame, sar: pd.DataFrame
+    cluster_id: str, df_in: pd.DataFrame, sau: pd.DataFrame, sar: pd.DataFrame
 ):
     """
     Create the wgMLST istance matrix for a specifc cluster
@@ -760,16 +760,21 @@ def run_nearest_neighbours_analysis_cluster(
 
     df_cluster = df_plasmids_clean.loc[df_plasmids_clean[CLUSTER_COL] == cluster_id]
 
-    nn_summary, nn_detail = run_nearest_neighbour_analysis(
-        df_plasmids_clean=df_cluster,
-    )
+    if not os.path.isfile(f"output/hgt_results/nn_summary_{cluster_id}.csv"):
+        nn_summary, nn_detail = run_nearest_neighbour_analysis(
+            df_plasmids_clean=df_cluster,
+        )
 
-    nn_summary.to_csv(
-        f"output/hgt_results/nn_summary_{cluster_id}.csv", index=False, sep=";"
-    )
-    nn_detail.to_csv(
-        f"output/hgt_results/nn_detail_{cluster_id}.csv", index=False, sep=";"
-    )
+        nn_summary.to_csv(
+            f"output/hgt_results/nn_summary_{cluster_id}.csv", index=False, sep=";"
+        )
+        nn_detail.to_csv(
+            f"output/hgt_results/nn_detail_{cluster_id}.csv", index=False, sep=";"
+        )
+    else:
+        nn_summary = pd.read_csv(
+            f"output/hgt_results/nn_summary_{cluster_id}.csv", sep=";"
+        )
 
     # fix/resolve parent column
     df_plasmids_clean_cluster = df_plasmids_clean.loc[
@@ -842,7 +847,7 @@ def run_nearest_neighbours_analysis_cluster(
     )
 
     subprocess.call(
-        f"Rscript scripts/annotated_tree.R {cluster_id}",
+        f"conda run -n r_conda Rscript scripts/annotated_tree.R {cluster_id}",
         shell=True,
     )
 
@@ -875,7 +880,7 @@ def run_nn_analysis(df_in: pd.DataFrame):
 
     with Pool(processes=NJOBS, maxtasksperchild=1) as pool:
         pool.map(
-            partial(run_nearest_neighbours_analysis_cluster, df_plasmids_clean=df),
+            partial(run_nearest_neighbours_analysis_cluster, df),
             clusters,
         )
 

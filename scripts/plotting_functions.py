@@ -477,6 +477,7 @@ def isolate_data(
     plt.tight_layout()
 
     plt.savefig(f"results/figures/figure1_isolate_plots.png", dpi=600)
+    plt.savefig(f"results/figures/figure1_isolate_plots.svg", dpi=600)
     plt.clf()
 
 
@@ -759,6 +760,11 @@ def glm_forest(
         dpi=600,
         bbox_inches="tight",
     )
+    fig.savefig(
+        f"results/figures/{output_name}.svg",
+        dpi=600,
+        bbox_inches="tight",
+    )
     return fig, axes
 
 
@@ -770,6 +776,7 @@ def gene_heatmap(result: pd.DataFrame, x_col: str):
         colorbar_label = "Count"
         xlabel = "Origin"
         outpath = "results/figures/figureS1_gene_count_origin.png"
+        outpath_vec = "results/figures/figureS1_gene_count_origin.svg"
 
     else:
         raise ValueError(f"Unsupported x_col: {x_col}")
@@ -976,6 +983,11 @@ def gene_heatmap(result: pd.DataFrame, x_col: str):
         dpi=600,
         bbox_inches="tight",
     )
+    fig.savefig(
+        outpath_vec,
+        dpi=600,
+        bbox_inches="tight",
+    )
 
     plt.close(fig)
 
@@ -1041,10 +1053,10 @@ def spillover_summary(df_in: pd.DataFrame, main_figure: bool):
             marker="s", c="#B0AEAE", edgecolors="black", label="Category\nrestricted"
         ),
         "novel_cluster_introduction": dict(
-            marker="o", c="#FF3131", edgecolors="k", label="Novel cluster\nintroduction"
+            marker="o", c="#D55E00", edgecolors="k", label="Novel cluster\nintroduction"
         ),
         "novel_gene_introduction": dict(
-            marker="^", c="#5BFF3A", edgecolors="k", label="Novel gene\nintroduction"
+            marker="^", c="#009E73", edgecolors="k", label="Novel gene\nintroduction"
         ),
     }
 
@@ -1201,15 +1213,21 @@ def spillover_summary(df_in: pd.DataFrame, main_figure: bool):
     # =========================================================
     if main_figure:
         outpath = "results/figures/figure5_gene_spillover_ST.png"
+        outpath_vec = "results/figures/figure5_gene_spillover_ST.svg"
     else:
         outpath = "results/figures/figureS2_gene_spillover_origin.png"
+        outpath_vec = "results/figures/figureS2_gene_spillover_origin.svg"
 
     fig.savefig(
         outpath,
         dpi=600,
         bbox_inches="tight",
     )
-
+    fig.savefig(
+        outpath_vec,
+        dpi=600,
+        bbox_inches="tight",
+    )
     plt.close(fig)
 
 
@@ -1351,6 +1369,7 @@ def tsne_by_cluster(
 
     plt.tight_layout()
     plt.savefig(f"results/figures/figure3_tnse.png", dpi=300)
+    plt.savefig(f"results/figures/figure3_tnse.svg", dpi=300)
     plt.clf()
 
 
@@ -1561,7 +1580,11 @@ def composition_by_cluster(
         dpi=300,
         bbox_inches="tight",
     )
-
+    fig.savefig(
+        "results/figures/figure4_cluster_distributions.svg",
+        dpi=300,
+        bbox_inches="tight",
+    )
     plt.close(fig)
 
 
@@ -2011,7 +2034,7 @@ def plot_single_tangle(
     )
     if cluster_id == "43":
         plt.savefig(
-            f"results/figures/figure7_{cluster_id}_bins_tanglegram.png",
+            f"results/figures/figure7_{cluster_id}_bins_tanglegram.svg",
             # bbox_inches="tight",
             dpi=600,
         )

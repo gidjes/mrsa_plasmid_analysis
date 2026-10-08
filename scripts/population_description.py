@@ -2486,8 +2486,8 @@ def cluster_overview(df_in: pd.DataFrame, metadata_df: pd.DataFrame):
 
     result = pd.concat(tables)
     result.to_csv(f"{out_path}/cluster_gene_counts.csv", sep=";")
-    result = pd.read_csv(f"{out_path}/cluster_gene_counts.csv", sep=";")
-    plot.gene_heatmap(result, cluster_col)
+    # result = pd.read_csv(f"{out_path}/cluster_gene_counts.csv", sep=";")
+    # plot.gene_heatmap(result, cluster_col)
 
     # ---------------------------------------------------------
     # 3.2.5 Cluster functional gene spillover
